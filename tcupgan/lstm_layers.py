@@ -141,11 +141,10 @@ class ConvLSTM(nn.Module):
         downsample2d = [nn.Conv2d(self.hidden_dim, next_dim, kernel_size=1),
                         nn.Tanh(), nn.BatchNorm2d(next_dim),
                         nn.MaxPool2d(pool_size)]
-                        
 
         # 3d max pool for preserving time domain
-        self.downsample3d = nn.Sequential(nn.BatchNorm3d(self.hidden_dim), nn.MaxPool3d(
-            (1, *pool_size)))
+        self.downsample3d = nn.Sequential(nn.BatchNorm3d(self.hidden_dim),
+                                          nn.MaxPool3d((1, *pool_size)))
 
         self.downsample2d = nn.Sequential(*downsample2d)
 

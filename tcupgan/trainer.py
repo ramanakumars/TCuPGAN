@@ -186,7 +186,7 @@ class Trainer:
         # empty lists for storing epoch loss data
         D_loss_ep, G_loss_ep = [], []
         for epoch in range(self.start, epochs + 1):
-            if (gen_scheduler is not None)&(dsc_scheduler is not None):
+            if (gen_scheduler is not None) & (dsc_scheduler is not None):
                 gen_lr = gen_scheduler.get_last_lr()[0]
                 dsc_lr = dsc_scheduler.get_last_lr()[0]
             else:
