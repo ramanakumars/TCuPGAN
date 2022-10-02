@@ -87,7 +87,7 @@ class LSTMVAE(nn.Module):
 
 
 class LSTMUNet(nn.Module):
-    def __init__(self, hidden_dims=[8, 16, 32],
+    def __init__(self, hidden_dims=[8, 16, 32], bottleneck_dims=[16, 8],
                  input_channels=1, output_channels=4):
 
         super(LSTMUNet, self).__init__()
@@ -109,6 +109,30 @@ class LSTMUNet(nn.Module):
             prev_filt = hidden_dims[i]
 
         self.encoder_layers = nn.ModuleList(encoder_layers)
+
+        prev_filt = hidden_dims[-1]
+
+        bottleneck_layers_enc = []
+        for j, filt in enumerate(bottleneck_dims):
+            bottleneck_layers_enc.extend([
+                nn.Conv2d(prev_filt, filt, (1, 1), padding=0,
+                          stride=1),
+                nn.LeakyReLU(0.2),
+                nn.BatchNorm2d(filt)])
+            prev_filt = filt
+        
+        bottleneck_layers_dec = []
+        decode_bottleneck = [*bottleneck_dims[::-1], hidden_dims[-1]]
+        for j, filt in enumerate(decode_bottleneck):
+            bottleneck_layers_dec.extend([
+                nn.Conv2d(prev_filt, filt, (1, 1), padding=0,
+                          stride=1),
+                nn.LeakyReLU(0.2),
+                nn.BatchNorm2d(filt)])
+            prev_filt = filt
+                
+        self.bottleneck_enc = nn.Sequential(*bottleneck_layers_enc)
+        self.bottleneck_dec = nn.Sequential(*bottleneck_layers_dec)
 
         decoder_layers = []
 
@@ -174,6 +198,12 @@ class LSTMUNet(nn.Module):
 
             x, h, c = layer(x, hidden)
             xencs.append(x)
+
+        # bottleneck the c dimension
+        enc_c = self.bottleneck_enc(c)
+
+        # decode the encoded c vector for reconstruction
+        c = dec_c = self.bottleneck_dec(enc_c)
 
         nlayers = len(self.decoder_layers)
         for i, layer in enumerate(self.decoder_layers):
