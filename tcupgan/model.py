@@ -120,7 +120,7 @@ class LSTMUNet(nn.Module):
                 nn.LeakyReLU(0.2),
                 nn.BatchNorm2d(filt)])
             prev_filt = filt
-        
+
         bottleneck_layers_dec = []
         decode_bottleneck = [*bottleneck_dims[::-1], hidden_dims[-1]]
         for j, filt in enumerate(decode_bottleneck):
@@ -130,7 +130,7 @@ class LSTMUNet(nn.Module):
                 nn.LeakyReLU(0.2),
                 nn.BatchNorm2d(filt)])
             prev_filt = filt
-                
+
         self.bottleneck_enc = nn.Sequential(*bottleneck_layers_enc)
         self.bottleneck_dec = nn.Sequential(*bottleneck_layers_dec)
 
@@ -203,7 +203,7 @@ class LSTMUNet(nn.Module):
         enc_c = self.bottleneck_enc(c)
 
         # decode the encoded c vector for reconstruction
-        c = dec_c = self.bottleneck_dec(enc_c)
+        c = self.bottleneck_dec(enc_c)
 
         nlayers = len(self.decoder_layers)
         for i, layer in enumerate(self.decoder_layers):

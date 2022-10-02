@@ -1,6 +1,5 @@
 import numpy as np
 import glob
-import netCDF4 as nc
 
 
 class DataGenerator:
@@ -43,10 +42,11 @@ class DataGenerator:
         for i in range(self.batch_size):
             data = np.load(imgfiles[i])
 
-            imgs[i,:] = data['img']
-            segs[i,:] = data['mask']
+            imgs[i, :] = data['img']
+            segs[i, :] = data['mask']
 
         return imgs, segs
+
 
 def create_generators(img_datafolder, batch_size,
                       val_split=0.1):
