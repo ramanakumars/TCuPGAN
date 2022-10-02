@@ -1,20 +1,15 @@
 import numpy as np
 import glob
+import netCDF4 as nc
 
 
 class DataGenerator:
-    def __init__(self, img_datafolder, seg_datafolder,
+    def __init__(self, datafolder,
                  batch_size, indices=None):
-        self.img_datafolder = img_datafolder
-        self.seg_datafolder = seg_datafolder
+        self.img_datafolder = datafolder
         self.batch_size = batch_size
 
-        self.imgfiles = np.asarray(sorted(glob.glob(img_datafolder + "*.npy")))
-        self.segfiles = np.asarray(sorted(glob.glob(seg_datafolder + "*.npy")))
-
-        assert len(self.imgfiles) == len(self.segfiles),\
-            (f"# of masks ({len(self.segfiles)}) must be "
-             f"the same as images ({len(self.imgfiles)})")
+        self.imgfiles = np.asarray(sorted(glob.glob(datafolder + "*.npz")))
 
         if indices is None:
             self.indices = np.arange(len(self.imgfiles))
@@ -24,9 +19,9 @@ class DataGenerator:
         self.ndata = len(self.indices)
 
         # get info about the data
-        img0 = np.load(self.imgfiles[0])
+        img0 = np.load(self.imgfiles[0])['img']
 
-        self.d, self.h, self.w = img0.shape
+        self.d, _, self.h, self.w = img0.shape
 
         print(f"Found {self.ndata} images of shape {self.w}x{self.h}x{self.d}")
 
@@ -41,34 +36,21 @@ class DataGenerator:
                                      (index + 1) * self.batch_size]
 
         imgfiles = self.imgfiles[batch_indices]
-        segfiles = self.segfiles[batch_indices]
 
-        imgs = np.zeros((self.batch_size, self.d, 1, self.h, self.w))
+        imgs = np.zeros((self.batch_size, self.d, 4, self.h, self.w))
         segs = np.zeros((self.batch_size, self.d, 4, self.h, self.w))
 
         for i in range(self.batch_size):
-            img = np.load(imgfiles[i])
-            seg = np.load(segfiles[i])
+            data = np.load(imgfiles[i])
 
-            imgs[i, :, 0, :, :] = img
-            segs[i, :, 1:, :] = seg
-
-            # create the background label
-            bg = np.zeros_like(segs[i, :, 0, :, :])
-            bg[seg.max(axis=1) == 0] = 1
-            segs[i, :, 0, :] = bg
+            imgs[i,:] = data['img']
+            segs[i,:] = data['mask']
 
         return imgs, segs
 
-
-def create_generators(img_datafolder, seg_datafolder, batch_size,
+def create_generators(img_datafolder, batch_size,
                       val_split=0.1):
-    imgfiles = np.asarray(sorted(glob.glob(img_datafolder + "*.npy")))
-    segfiles = np.asarray(sorted(glob.glob(seg_datafolder + "*.npy")))
-
-    assert len(imgfiles) == len(segfiles),\
-        (f"# of masks ({len(segfiles)}) must be "
-         f"the same as images ({len(imgfiles)})")
+    imgfiles = np.asarray(sorted(glob.glob(img_datafolder + "*.npz")))
 
     ndata = len(imgfiles)
 
@@ -81,9 +63,9 @@ def create_generators(img_datafolder, seg_datafolder, batch_size,
     val_ind = inds[:val_split_ind]
     training_ind = inds[val_split_ind:]
 
-    train_data = DataGenerator(img_datafolder, seg_datafolder, batch_size,
+    train_data = DataGenerator(img_datafolder, batch_size,
                                indices=training_ind)
-    val_data = DataGenerator(img_datafolder, seg_datafolder, batch_size,
+    val_data = DataGenerator(img_datafolder, batch_size,
                              indices=val_ind)
 
     return train_data, val_data
