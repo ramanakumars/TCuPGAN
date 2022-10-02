@@ -23,7 +23,8 @@ From https://github.com/ndrplz/ConvLSTM_pytorch
 
 class ConvLSTMCell(nn.Module):
 
-    def __init__(self, input_dim, hidden_dim, kernel_size, bias=True):
+    def __init__(self, input_dim, hidden_dim, kernel_size,
+                 bias=True, dropout=0.25):
         """
         Initialize ConvLSTM cell. This outputs the feature vector
         at the next timestep and the cell state learned upto this
@@ -60,6 +61,11 @@ class ConvLSTMCell(nn.Module):
                               padding=self.padding,
                               bias=self.bias)
 
+        if dropout > 0:
+            self.dropout = nn.Dropout(dropout)
+        else:
+            self.dropout = None
+
     def forward(self, x, hidden_state):
         # get the image sizes
         nbatch, nt, _, height, width = x.size()
@@ -94,6 +100,9 @@ class ConvLSTMCell(nn.Module):
 
         # convolve the combined input
         combined_conv = self.conv(combined)
+
+        if self.dropout is not None:
+            combined_conv = self.dropout(combined_conv)
 
         # split into the separate gates
         cc_i, cc_f, cc_o, cc_g = torch.split(
