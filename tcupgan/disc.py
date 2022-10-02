@@ -9,7 +9,7 @@ class PatchDiscriminator(nn.Module):
         is real or fake.
     '''
 
-    def __init__(self, input_channels, nlayers=3, nfilt=16):
+    def __init__(self, input_channels, nlayers=3, nfilt=16, dropout=0.5):
         super(PatchDiscriminator, self).__init__()
 
         # the first convolution goes from the input channels
@@ -25,6 +25,8 @@ class PatchDiscriminator(nn.Module):
                                     padding=(1, 1, 1), bias=False))
             layers.append(nn.LeakyReLU(0.2, True))
             layers.append(nn.BatchNorm3d(next_filt))
+            if dropout > 0:
+                layers.append(nn.Dropout(dropout))
 
             # the number of filters exponentially increase
             prev_filt = next_filt
