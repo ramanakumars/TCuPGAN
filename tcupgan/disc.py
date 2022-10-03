@@ -9,7 +9,7 @@ class PatchDiscriminator(nn.Module):
         is real or fake.
     '''
 
-    def __init__(self, input_channels, nlayers=3, nfilt=16, dropout=0.5):
+    def __init__(self, input_channels, nlayers=3, nfilt=16, dropout=0.25):
         super(PatchDiscriminator, self).__init__()
 
         # the first convolution goes from the input channels
