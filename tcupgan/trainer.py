@@ -4,7 +4,9 @@ import tqdm
 import glob
 from torch import optim
 from torch.optim.lr_scheduler import ExponentialLR
-from .losses import generator_loss, discriminator_loss
+from .losses import generator_seg_loss, generator_vae_loss,\
+    discriminator_loss, kl_loss
+from .model import LSTMVAE, LSTMUNet
 
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -29,23 +31,34 @@ class Trainer:
 
         self.start = 1
 
-    def train_batch(self, x, y):
+    def train_batch(self, x, y=None):
         '''
             Train the generator and discriminator on a single batch
         '''
 
-        # crop the batch randomly to 256x256
         input_img, target_img = x, y
 
-        # conver the input image and mask to tensors
+        # convert the input image and mask to tensors
         input_img = torch.as_tensor(input_img, dtype=torch.float).to(device)
-        target_img = torch.as_tensor(target_img, dtype=torch.float).to(device)
 
-        # generate the image mask
-        generated_image = self.generator(input_img)
+        if y is not None:
+            target_img = torch.as_tensor(
+                target_img, dtype=torch.float).to(device)
+        else:
+            target_img = torch.as_tensor(
+                input_img, dtype=torch.float).to(device)
 
         # get the generator (tversky) loss
-        G_loss = generator_loss(generated_image, target_img, beta=self.fc_beta)
+        if isinstance(self.generator, LSTMUNet):
+            generated_image = self.generator(input_img)
+            G_loss = generator_seg_loss(generated_image, target_img,
+                                        beta=self.fc_beta, gamma=self.fc_gamma)
+        elif isinstance(self.generator, LSTMVAE):
+            generated_image, c_mu, c_sig = self.generator(input_img)
+            G_VAE_loss = generator_vae_loss(generated_image, input_img)
+            G_KL_loss = kl_loss(c_mu, c_sig)
+
+            G_loss = G_VAE_loss + self.kl_beta*G_KL_loss
 
         # train the generator one batch
         self.gen_optimizer.zero_grad()
@@ -80,19 +93,26 @@ class Trainer:
         '''
             Train the generator and discriminator on a single batch
         '''
-
-        # crop the batch randomly to 256x256
         input_img, target_img = x, y
 
-        # conver the input image and mask to tensors
-        input_img = torch.Tensor(input_img).to(device)
-        target_img = torch.Tensor(target_img).to(device)
+        # convert the input image and mask to tensors
+        input_img = torch.as_tensor(input_img, dtype=torch.float).to(device)
 
-        # generate the image mask
-        generated_image = self.generator(input_img)
+        if y is not None:
+            target_img = torch.as_tensor(
+                target_img, dtype=torch.float).to(device)
+        else:
+            target_img = torch.as_tensor(
+                input_img, dtype=torch.float).to(device)
 
         # get the generator (tversky) loss
-        G_loss = generator_loss(generated_image, target_img, beta=self.fc_beta)
+        if isinstance(self.generator, LSTMUNet):
+            generated_image = self.generator(input_img)
+            G_loss = generator_seg_loss(generated_image, target_img,
+                                        beta=self.fc_beta, gamma=self.fc_gamma)
+        elif isinstance(self.generator, LSTMVAE):
+            generated_image, z = self.generator(input_img)
+            G_loss = generator_vae_loss(generated_image, input_img)
 
         # Train the discriminator
         disc_inp_fake = torch.cat((input_img, generated_image), 2)
@@ -102,15 +122,19 @@ class Trainer:
         D_fake = self.discriminator(disc_inp_fake.detach())
 
         try:
-            D_fake_loss = discriminator_loss(D_fake, self.fake_target_val)
-            D_real_loss = discriminator_loss(D_real, self.real_target_val)
+            D_fake_loss = discriminator_loss(D_fake, self.fake_target_train)
+            D_real_loss = discriminator_loss(D_real, self.real_target_train)
         except Exception:
             D_fake_loss = discriminator_loss(
-                D_fake, self.fake_target_val[:input_img.shape[0]])
+                D_fake, self.fake_target_train[:input_img.shape[0]])
             D_real_loss = discriminator_loss(
-                D_real, self.real_target_val[:input_img.shape[0]])
+                D_real, self.real_target_train[:input_img.shape[0]])
 
         D_total_loss = D_real_loss + D_fake_loss
+
+        self.disc_optimizer.zero_grad()
+        D_total_loss.backward()
+        self.disc_optimizer.step()
 
         return G_loss.cpu().item(), D_total_loss.cpu().item()
 
@@ -163,14 +187,14 @@ class Trainer:
 
         # create the output data for the discriminator
         self.real_target_train = torch.ones(
-            train_data.batch_size, 1, 4, 4, 4).to(device)
+            train_data.batch_size, 1, *self.disc_output).to(device)
         self.fake_target_train = torch.zeros(
-            train_data.batch_size, 1, 4, 4, 4).to(device)
+            train_data.batch_size, 1, *self.disc_output).to(device)
 
         self.real_target_val = torch.ones(
-            val_data.batch_size, 1, 4, 4, 4).to(device)
+            val_data.batch_size, 1, *self.disc_output).to(device)
         self.fake_target_val = torch.zeros(
-            val_data.batch_size, 1, 4, 4, 4).to(device)
+            val_data.batch_size, 1, *self.disc_output).to(device)
 
         # set up the learning rate scheduler with exponential lr decay
         if lr_decay is not None:
