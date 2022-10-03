@@ -37,6 +37,12 @@ def fc_tversky(y_true, y_pred, beta, gamma=0.5, batch_mean=True):
         return torch.pow(focal_tversky_loss, gamma)
 
 
+def kl_loss(mu, sig):
+    kl = 0.5*torch.mean(-1 - sig + torch.square(mu) + torch.exp(sig), axis=-1)
+    return torch.mean(kl)
+
+
 # alias
-generator_loss = fc_tversky
+generator_seg_loss = fc_tversky
+generator_vae_loss = nn.L1Loss()
 discriminator_loss = nn.BCELoss()

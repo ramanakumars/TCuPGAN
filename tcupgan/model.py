@@ -3,9 +3,15 @@ import torch
 from .lstm_layers import ConvLSTM, ConvTransposeLSTM
 
 
+def sample(mu, log_var):
+    std = torch.exp(0.5*log_var)
+    eps = torch.randn_like(std)
+    return mu + eps*std
+
+
 class LSTMVAE(nn.Module):
-    def __init__(self, hidden_dims=[8, 16, 32],
-                 input_channels=1, output_channels=3):
+    def __init__(self, hidden_dims=[8, 16, 32], bottleneck_dims=[16, 8],
+                 input_channels=1):
 
         super(LSTMVAE, self).__init__()
 
@@ -27,17 +33,46 @@ class LSTMVAE(nn.Module):
 
         self.encoder_layers = nn.ModuleList(encoder_layers)
 
+        prev_filt = hidden_dims[-1]
+
+        bottleneck_layers_enc = []
+        for j, filt in enumerate(bottleneck_dims):
+            bottleneck_layers_enc.extend([
+                nn.Conv2d(prev_filt, filt, (1, 1), padding=0,
+                          stride=1),
+                nn.LeakyReLU(0.2),
+                nn.BatchNorm2d(filt)])
+            prev_filt = filt
+
+        self.enc_mu = nn.Conv2d(filt, filt, (1, 1), padding=0, stride=1)
+        self.enc_sig = nn.Conv2d(filt, filt, (1, 1), padding=0, stride=1)
+
+        bottleneck_layers_dec = []
+        decode_bottleneck = [*bottleneck_dims[::-1], hidden_dims[-1]]
+        for j, filt in enumerate(decode_bottleneck):
+            bottleneck_layers_dec.extend([
+                nn.Conv2d(prev_filt, filt, (1, 1), padding=0,
+                          stride=1),
+                nn.LeakyReLU(0.2),
+                nn.BatchNorm2d(filt)])
+            prev_filt = filt
+
+        self.bottleneck_enc = nn.Sequential(*bottleneck_layers_enc)
+        self.bottleneck_dec = nn.Sequential(*bottleneck_layers_dec)
+
         decoder_layers = []
 
         # invert the hidden layer filters for the decoder
         # also add the input channel at the end
-        decoder_hidden_dims = [*hidden_dims[::-1][1:], output_channels]
+        decoder_hidden_dims = [*hidden_dims[::-1][1:], input_channels]
 
         # the starting size is the last filter size of the encoder
         hidden_dim = hidden_dims[-1]
         for i in range(len(decoder_hidden_dims) - 1):
             # each decoder has the ith filter number of channels,
             # but (i+1)th filter in its cell state vector
+            # in the UNet we also skip across the bottleneck, so the input is
+            # the cat of both the skipped vector and the upsampling vector
 
             last_layer = (i == len(decoder_hidden_dims) - 2)
             decoder_layers.append(ConvTransposeLSTM(decoder_hidden_dims[i],
@@ -81,9 +116,21 @@ class LSTMVAE(nn.Module):
             Do the encode/decode loop
         '''
         enc_x, enc_c = self.encode(x)
-        img = self.decode(enc_x, enc_c)
 
-        return img
+        # bottleneck the c dimension
+        bottleneck_c = self.bottleneck_enc(enc_c)
+
+        c_mu = self.enc_mu(bottleneck_c)
+        c_sig = self.enc_sig(bottleneck_c)
+
+        sampled_c = sample(c_mu, c_sig)
+
+        # decode the encoded c vector for reconstruction
+        dec_c = self.bottleneck_dec(sampled_c)
+
+        img = self.decode(enc_x, dec_c)
+
+        return img, c_mu, c_sig
 
 
 class LSTMUNet(nn.Module):
