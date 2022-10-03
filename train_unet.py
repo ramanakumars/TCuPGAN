@@ -10,7 +10,7 @@ from torch.optim.lr_scheduler import ExponentialLR
 
 device = 'cuda'
 
-base_folder = '/home/fortson/rsankar/BraTS2020/training/'
+base_folder = '/home/fortson/rsankar/data/BraTS2021/training.resized/'
 train_data, val_data = create_generators(base_folder,
                                          batch_size=12)
 
@@ -25,10 +25,12 @@ discriminator = PatchDiscriminator(input_channels=8, nfilt=16).to(device)
 summary(generator, input_size=(1, 155, 4, 128, 128), device=device)
 
 
-trainer = Trainer(generator, discriminator, 'checkpoints-gamma05/')
+trainer = Trainer(generator, discriminator, 'checkpoints.resized-gamma05/')
 trainer.fc_beta = 0.7
+trainer.fc_gamma = 0.5
+trainer.disc_output = [4, 4, 4]
 
-trainer.load_last_checkpoint()
+#trainer.load_last_checkpoint()
 
 gen_learning_rate = 1.e-3*(0.95)**(trainer.start/5)
 dsc_learning_rate = 1.e-4*(0.95)**(trainer.start/5)
