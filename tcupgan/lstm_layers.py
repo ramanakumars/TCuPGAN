@@ -179,7 +179,7 @@ class ConvLSTM(nn.Module):
 
 class ConvTransposeLSTM(nn.Module):
     def __init__(self, input_dim, hidden_dim, next_dim,
-                 kernel_size, pool_size, last_layer=False):
+                 kernel_size, pool_size, last_layer=False, last_act='softmax'):
         super(ConvTransposeLSTM, self).__init__()
 
         self.kernel_size = kernel_size
@@ -205,7 +205,10 @@ class ConvTransposeLSTM(nn.Module):
 
         if last_layer:
             # last layer is a softmax to predict masks
-            act3d = nn.Softmax(dim=1)
+            if last_act == 'softmax':
+                act3d = nn.Softmax(dim=1)
+            elif last_act == 'elu':
+                act3d = nn.ELU()
             self.upsample3d = nn.Sequential(convt3d, act3d)
         else:
             act3d = nn.Tanh()
