@@ -20,15 +20,15 @@ bottleneck_dims = [64, 32, 16, 8, 6]
 generator = LSTMUNet(hidden_dims=hidden, bottleneck_dims=bottleneck_dims,
                      input_channels=4).to(device)
 
-discriminator = PatchDiscriminator(input_channels=8, nfilt=16).to(device)
+discriminator = PatchDiscriminator(input_channels=8, nlayers=2, nfilt=16).to(device)
 
-summary(generator, input_size=(1, 155, 4, 128, 128), device=device)
+summary(discriminator, input_size=(1, 155, 8, 128, 128), device=device)
 
 
 trainer = Trainer(generator, discriminator, 'checkpoints.resized-gamma05/')
 trainer.fc_beta = 0.7
 trainer.fc_gamma = 0.5
-trainer.disc_output = [4, 4, 4]
+trainer.disc_output = [19, 16, 16]
 
 #trainer.load_last_checkpoint()
 
