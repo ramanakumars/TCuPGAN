@@ -79,7 +79,7 @@ class LSTMVAE(nn.Module):
                                                     hidden_dim,
                                                     decoder_hidden_dims[i + 1],
                                                     (3, 3), (2, 2),
-                                                    last_layer=last_layer))
+                                                    last_layer=last_layer, last_act='elu'))
             hidden_dim = decoder_hidden_dims[i + 1]
 
         self.decoder_layers = nn.ModuleList(decoder_layers)
