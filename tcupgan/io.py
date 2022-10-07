@@ -22,7 +22,7 @@ class DataGenerator:
 
         # get info about the data
 
-        if self.file_type == '.npz':
+        if self.file_type == 'npz':
             img0 = np.load(self.imgfiles[0])['img']
         else:
             img0 = np.load(self.imgfiles[0])
@@ -67,12 +67,12 @@ class NpyDataGenerator(DataGenerator):
 
         imgfiles = self.imgfiles[batch_indices]
 
-        imgs = np.zeros((self.batch_size, self.d, 1, self.h, self.w))
+        imgs = np.zeros((self.batch_size, self.d, self.h, self.w))
 
         for i in range(self.batch_size):
-            imgs[i, :, 0, :, :] = np.load(imgfiles[i])
+            imgs[i, :] = np.load(imgfiles[i])
 
-        return imgs, None
+        return np.expand_dims(imgs, axis=2), None
 
 
 def create_generators(img_datafolder, batch_size,
