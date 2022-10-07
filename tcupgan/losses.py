@@ -29,7 +29,7 @@ def fc_tversky(y_true, y_pred, beta, gamma=0.5, batch_mean=True):
     tversky = (tp + smooth) /\
         (tp + beta * fn + (1. - beta) * fp + smooth)
 
-    focal_tversky_loss = torch.sum(torch.pow(1 - tversky, gamma), axis = 1)
+    focal_tversky_loss = torch.sum(torch.pow(1 - tversky, gamma), axis=1)
 
     if batch_mean:
         return torch.mean(focal_tversky_loss)
@@ -41,10 +41,12 @@ def kl_loss(mu, sig):
     kl = 0.5*torch.mean(-1 - sig + torch.square(mu) + torch.exp(sig), axis=-1)
     return torch.mean(kl)
 
+
 def MAE(input_img, target_img):
-    diff = torch.mean(torch.abs(input_img - target_img), axis=(2,3,4))
+    diff = torch.mean(torch.abs(input_img - target_img), axis=(2, 3, 4))
 
     return torch.mean(torch.sum(diff, axis=1))
+
 
 # alias
 generator_seg_loss = fc_tversky
