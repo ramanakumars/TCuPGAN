@@ -111,8 +111,11 @@ class Trainer:
             G_loss = generator_seg_loss(generated_image, target_img,
                                         beta=self.fc_beta, gamma=self.fc_gamma)
         elif isinstance(self.generator, LSTMVAE):
-            generated_image, z = self.generator(input_img)
-            G_loss = generator_vae_loss(generated_image, input_img)
+            generated_image, c_mu, c_sig = self.generator(input_img)
+            G_VAE_loss = generator_vae_loss(generated_image, input_img)
+            G_KL_loss = kl_loss(c_mu, c_sig)
+
+            G_loss = G_VAE_loss + self.kl_beta*G_KL_loss
 
         # Train the discriminator
         disc_inp_fake = torch.cat((input_img, generated_image), 2)
