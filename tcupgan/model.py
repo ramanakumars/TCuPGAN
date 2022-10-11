@@ -1,6 +1,6 @@
 import torch.nn as nn
 import torch
-from .lstm_layers import ConvLSTM, ConvTransposeLSTM
+from .lstm_layers import ConvLSTM, ConvTransposeLSTM, apply_on_channel
 
 
 def sample(mu, log_var):
@@ -201,8 +201,14 @@ class LSTMUNet(nn.Module):
                                                     hidden_dim,
                                                     decoder_hidden_dims[i + 1],
                                                     (3, 3), (2, 2),
-                                                    last_layer=last_layer))
+                                                    last_layer=last_layer,
+                                                    last_act='tanh'))
             hidden_dim = decoder_hidden_dims[i + 1]
+
+        self.conv_smoothing = nn.Conv3d(output_channels, output_channels,
+                                        (1, 3, 3), stride=(1, 1, 1),
+                                        padding=(0, 1, 1))
+        self.pred_final = nn.Softmax(dim=2)
 
         self.decoder_layers = nn.ModuleList(decoder_layers)
 
@@ -258,5 +264,9 @@ class LSTMUNet(nn.Module):
             # skip the x vector across the bottleneck
             xconc = torch.cat([x, xencs[nlayers - i - 1]], dim=2)
             x, c = layer(xconc, c)
+
+        # smooth the final output mask to remove the gridding
+        x = apply_on_channel(x, self.conv_smoothing)
+        x = self.pred_final(x)
 
         return x

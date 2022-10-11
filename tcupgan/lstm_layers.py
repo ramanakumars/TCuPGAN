@@ -209,6 +209,8 @@ class ConvTransposeLSTM(nn.Module):
                 act3d = nn.Softmax(dim=1)
             elif last_act == 'elu':
                 act3d = nn.ELU()
+            elif last_act == 'tanh':
+                act3d = nn.Tanh()
             self.upsample3d = nn.Sequential(convt3d, act3d)
         else:
             act3d = nn.Tanh()
