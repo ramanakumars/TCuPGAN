@@ -20,12 +20,12 @@ class PatchDiscriminator(nn.Module):
         layers = []
         for i in range(nlayers + 1):
             # for each layer, we apply conv, act and normalization
-            layers.append(nn.Conv3d(prev_filt, next_filt, (3, 3, 3),
+            layers.append(nn.Conv3d(prev_filt, next_filt, (1, 3, 3),
                                     stride=(1, 1, 1),
-                                    padding=(1, 1, 1)))
+                                    padding=(0, 1, 1)))
             layers.append(nn.Tanh())
             layers.append(nn.BatchNorm3d(next_filt))
-            layers.append(nn.MaxPool3d((2, 2, 2)))
+            layers.append(nn.MaxPool3d((1, 2, 2)))
             if dropout > 0:
                 layers.append(nn.Dropout(dropout))
 
@@ -34,8 +34,8 @@ class PatchDiscriminator(nn.Module):
             next_filt = next_filt * min([2**i, 8])
 
         # last predictive layer
-        layers.append(nn.Conv3d(prev_filt, 1, (3, 3, 3),
-                                padding=(1, 1, 1)))
+        layers.append(nn.Conv3d(prev_filt, 1, (1, 3, 3),
+                                padding=(0, 1, 1)))
         layers.append(nn.Sigmoid())
 
         self.discriminator = nn.Sequential(*layers)
