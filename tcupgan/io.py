@@ -6,7 +6,8 @@ class DataGenerator:
     file_type = 'npz'
 
     def __init__(self, datafolder,
-                 batch_size, indices=None):
+                 batch_size, inchannels=3, outchannels=3,
+                 indices=None, norm=1.):
         self.img_datafolder = datafolder
         self.batch_size = batch_size
 
@@ -19,6 +20,11 @@ class DataGenerator:
             self.indices = indices
 
         self.ndata = len(self.indices)
+
+        self.inchannels = inchannels
+        self.outchannels = outchannels
+
+        self.norm = norm
 
         # get info about the data
 
@@ -46,13 +52,13 @@ class DataGenerator:
 
         imgfiles = self.imgfiles[batch_indices]
 
-        imgs = np.zeros((self.batch_size, self.d, 4, self.h, self.w))
-        segs = np.zeros((self.batch_size, self.d, 4, self.h, self.w))
+        imgs = np.zeros((self.batch_size, self.d, self.inchannels, self.h, self.w))
+        segs = np.zeros((self.batch_size, self.d, self.outchannels, self.h, self.w))
 
         for i in range(self.batch_size):
             data = np.load(imgfiles[i])
 
-            imgs[i, :] = data['img']
+            imgs[i, :] = data['img']/self.norm
             segs[i, :] = data['mask']
 
         return imgs, segs
@@ -75,8 +81,9 @@ class NpyDataGenerator(DataGenerator):
         return np.expand_dims(imgs, axis=2), None
 
 
-def create_generators(img_datafolder, batch_size,
-                      val_split=0.1, datatype='npz'):
+def create_generators(img_datafolder, batch_size, inchannels=3,
+                      outchannels=3, val_split=0.1, datatype='npz',
+                      norm=1.):
     if datatype == 'npz':
         imgfiles = np.asarray(sorted(glob.glob(img_datafolder + "*.npz")))
     elif datatype == 'npy':
@@ -95,13 +102,17 @@ def create_generators(img_datafolder, batch_size,
 
     if datatype == 'npz':
         train_data = DataGenerator(img_datafolder, batch_size,
-                                   indices=training_ind)
+                                   indices=training_ind, inchannels=inchannels,
+                                   outchannels=outchannels, norm=norm)
         val_data = DataGenerator(img_datafolder, batch_size,
-                                 indices=val_ind)
+                                 indices=val_ind, inchannels=inchannels,
+                                 outchannels=outchannels, norm=norm)
     elif datatype == 'npy':
         train_data = NpyDataGenerator(img_datafolder, batch_size,
-                                      indices=training_ind)
+                                      indices=training_ind, inchannels=inchannels,
+                                      outchannels=outchannels, norm=norm)
         val_data = NpyDataGenerator(img_datafolder, batch_size,
-                                    indices=val_ind)
+                                    indices=val_ind, inchannels=inchannels,
+                                    outchannels=outchannels, norm=norm)
 
     return train_data, val_data
