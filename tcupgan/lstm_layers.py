@@ -16,6 +16,20 @@ def apply_on_channel(x, layer):
     return x
 
 
+def time_distribute(x, layer):
+    '''
+        Applies layer over the temporal axis (default dim 1)
+    '''
+    
+    nt = x.shape[1]
+
+    outputs = []
+    for t in range(nt):
+        outi = layer(x[:,t,:])
+        outputs.append(outi)
+
+    return torch.stack(outputs, axis=1)
+
 '''
 From https://github.com/ndrplz/ConvLSTM_pytorch
 '''
@@ -24,7 +38,7 @@ From https://github.com/ndrplz/ConvLSTM_pytorch
 class ConvLSTMCell(nn.Module):
 
     def __init__(self, input_dim, hidden_dim, kernel_size,
-                 bias=True, dropout=0.25):
+                 bias=True, dropout=0):
         """
         Initialize ConvLSTM cell. This outputs the feature vector
         at the next timestep and the cell state learned upto this
@@ -127,10 +141,10 @@ class ConvLSTMCell(nn.Module):
             called from the ConvLSTM object
         '''
         height, width = image_size
-        return (torch.zeros(batch_size, self.hidden_dim, height, width,
-                            device=self.conv.weight.device),
-                torch.zeros(batch_size, self.hidden_dim, height, width,
-                            device=self.conv.weight.device))
+        return (torch.rand(batch_size, self.hidden_dim, height, width,
+                            device=self.conv.weight.device, requires_grad=True),
+                torch.rand(batch_size, self.hidden_dim, height, width,
+                            device=self.conv.weight.device, requires_grad=True))
 
 
 class ConvLSTM(nn.Module):
@@ -148,7 +162,7 @@ class ConvLSTM(nn.Module):
 
         # 2d max pooling on the hidden layers
         downsample2d = [nn.Conv2d(self.hidden_dim, next_dim, kernel_size=1),
-                        nn.Tanh(), nn.BatchNorm2d(next_dim),
+                        nn.ReLU(True), nn.BatchNorm2d(next_dim),
                         nn.MaxPool2d(pool_size)]
 
         # 3d max pool for preserving time domain
@@ -179,7 +193,7 @@ class ConvLSTM(nn.Module):
 
 class ConvTransposeLSTM(nn.Module):
     def __init__(self, input_dim, hidden_dim, next_dim,
-                 kernel_size, pool_size, last_layer=False, last_act='softmax'):
+                 kernel_size, pool_size):
         super(ConvTransposeLSTM, self).__init__()
 
         self.kernel_size = kernel_size
@@ -194,7 +208,7 @@ class ConvTransposeLSTM(nn.Module):
         convt2d = nn.ConvTranspose2d(self.hidden_dim,
                                      next_dim,
                                      pool_size, stride=pool_size)
-        act2d = nn.Tanh()
+        act2d = nn.ReLU(True)
         bn2d = nn.BatchNorm2d(next_dim)
 
         # upsampling the feature vector
@@ -203,23 +217,13 @@ class ConvTransposeLSTM(nn.Module):
                                      (1, *pool_size),
                                      stride=(1, *pool_size))
 
-        if last_layer:
-            # last layer is a softmax to predict masks
-            if last_act == 'softmax':
-                act3d = nn.Softmax(dim=1)
-            elif last_act == 'elu':
-                act3d = nn.ELU()
-            elif last_act == 'tanh':
-                act3d = nn.Tanh()
-            self.upsample3d = nn.Sequential(convt3d, act3d)
-        else:
-            act3d = nn.Tanh()
-            bn3d = nn.BatchNorm3d(next_dim)
-            self.upsample3d = nn.Sequential(convt3d, act3d, bn3d)
+        act3d = nn.ReLU(True)
+        bn3d = nn.BatchNorm3d(next_dim)
+        self.upsample3d = nn.Sequential(convt3d, act3d, bn3d)
 
         self.upsample2d = nn.Sequential(convt2d, act2d, bn2d)
 
-    def forward(self, x, c=None):
+    def forward(self, x, h=None, c=None):
         '''
             Runs the ConvLSTM layer. Expects input of the shape
             (batch_size, time, features, height, width), and outputs
@@ -229,12 +233,67 @@ class ConvTransposeLSTM(nn.Module):
             (batch_size, self.hidden_dim, height, width)
         '''
 
-        hidden_state = [None, c]
+        hidden_state = [h, c]
 
         output_feature, c = self.lstmlayer(x, hidden_state)
 
         # apply max pooling on the LSTM result
         c = self.upsample2d(c)  # , self.upsample2d)
         output_feature = apply_on_channel(output_feature, self.upsample3d)
+
+        return output_feature, c
+
+class UpSampleLSTM(nn.Module):
+    def __init__(self, input_dim, hidden_dim, next_dim,
+                 kernel_size, pool_size):
+        super(UpSampleLSTM, self).__init__()
+
+        self.kernel_size = kernel_size
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+
+        self.lstmlayer = ConvLSTMCell(input_dim=self.input_dim,
+                                      hidden_dim=self.hidden_dim,
+                                      kernel_size=self.kernel_size)
+
+        # for upsampling the hidden vectors
+        us2d = nn.Upsample(scale_factor=pool_size)
+        conv2d = nn.Conv2d(self.hidden_dim,
+                            next_dim, kernel_size, stride=1, padding=1)
+        act2d = nn.ReLU(True)
+        bn2d = nn.BatchNorm2d(next_dim)
+
+        # upsampling the feature vector
+        '''
+        us3d = nn.Upsample(scale_factor=(1, *pool_size))
+        conv3d = nn.Conv3d(self.hidden_dim,
+                             next_dim,
+                             (1, *kernel_size),
+                             stride=1, padding=(0, 1, 1))
+
+        act3d = nn.ReLU(True)
+        bn3d = nn.BatchNorm3d(next_dim)
+        self.upsample3d = nn.Sequential(us3d, conv3d, act3d, bn3d)
+        '''
+
+        self.upsample2d = nn.Sequential(us2d, conv2d, act2d)#, bn2d)
+
+    def forward(self, x, h=None, c=None):
+        '''
+            Runs the ConvLSTM layer. Expects input of the shape
+            (batch_size, time, features, height, width), and outputs
+            the temporal feature vector of size
+            (batch_size, time, self.hidden_dim, height, width) as well
+            as the last hidden state and the cell state, both of which are
+            (batch_size, self.hidden_dim, height, width)
+        '''
+
+        hidden_state = [h, c]
+
+        output_feature, c = self.lstmlayer(x, hidden_state)
+
+        # apply max pooling on the LSTM result
+        c = self.upsample2d(c)  # , self.upsample2d)
+        output_feature = time_distribute(output_feature, self.upsample2d)#apply_on_channel(output_feature, self.upsample3d)
 
         return output_feature, c

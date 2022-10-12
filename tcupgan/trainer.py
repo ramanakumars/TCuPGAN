@@ -6,7 +6,7 @@ from torch import optim
 from torch.optim.lr_scheduler import ExponentialLR
 from .losses import generator_seg_loss, generator_vae_loss,\
     discriminator_loss, kl_loss
-from .model import LSTMVAE, LSTMUNet
+from .model import LSTMVAE, LSTMUNet, EncLSTMUNet
 
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -48,8 +48,9 @@ class Trainer:
             target_img = torch.as_tensor(
                 input_img, dtype=torch.float).to(device)
 
+        torch.autograd.set_detect_anomaly(True)
         # get the generator (tversky) loss
-        if isinstance(self.generator, LSTMUNet):
+        if self.generator.gen_type == 'UNet':
             generated_image = self.generator(input_img)
             G_loss = generator_seg_loss(generated_image, target_img,
                                         beta=self.fc_beta, gamma=self.fc_gamma)
@@ -106,7 +107,7 @@ class Trainer:
                 input_img, dtype=torch.float).to(device)
 
         # get the generator (tversky) loss
-        if isinstance(self.generator, LSTMUNet):
+        if self.generator.gen_type == 'UNet':
             generated_image = self.generator(input_img)
             G_loss = generator_seg_loss(generated_image, target_img,
                                         beta=self.fc_beta, gamma=self.fc_gamma)
