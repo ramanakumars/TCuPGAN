@@ -6,7 +6,7 @@ from torch import optim
 from torch.optim.lr_scheduler import ExponentialLR
 from .losses import generator_seg_loss, generator_vae_loss,\
     discriminator_loss, kl_loss
-from .model import LSTMVAE, LSTMUNet, EncLSTMUNet
+#from .model import LSTMVAE, LSTMUNet
 
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
