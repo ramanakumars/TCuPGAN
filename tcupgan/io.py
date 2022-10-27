@@ -49,13 +49,15 @@ class DataGenerator:
     def __getitem__(self, index):
         batch_indices = self.indices[index * self.batch_size:
                                      (index + 1) * self.batch_size]
-
+        return self.get_from_indices(batch_indices)
+    
+    def get_from_indices(self, batch_indices):
         imgfiles = self.imgfiles[batch_indices]
 
-        imgs = np.zeros((self.batch_size, self.d, self.inchannels, self.h, self.w))
-        segs = np.zeros((self.batch_size, self.d, self.outchannels, self.h, self.w))
+        imgs = np.zeros((len(imgfiles), self.d, self.inchannels, self.h, self.w))
+        segs = np.zeros((len(imgfiles), self.d, self.outchannels, self.h, self.w))
 
-        for i in range(self.batch_size):
+        for i in range(len(imgfiles)):
             data = np.load(imgfiles[i])
 
             imgs[i, :] = data['img']/self.norm
