@@ -161,11 +161,11 @@ class ConvLSTM(nn.Module):
                                       kernel_size=self.kernel_size)
 
         # 2d max pooling on the hidden layers
-        #downsample2d = [nn.Conv2d(self.hidden_dim, next_dim, kernel_size=1),
-        #                nn.Tanh(), nn.BatchNorm2d(next_dim),
-        #                nn.MaxPool2d(pool_size)]
-        downsample2d = [nn.BatchNorm2d(self.hidden_dim),
+        downsample2d = [nn.Conv2d(self.hidden_dim, next_dim, kernel_size=1),
+                        nn.LeakyReLU(0.2), nn.BatchNorm2d(next_dim),
                         nn.MaxPool2d(pool_size)]
+        #downsample2d = [nn.BatchNorm2d(self.hidden_dim),
+        #                nn.MaxPool2d(pool_size)]
 
         # 3d max pool for preserving time domain
         self.downsample3d = nn.Sequential(nn.BatchNorm3d(self.hidden_dim),
@@ -210,7 +210,7 @@ class ConvTransposeLSTM(nn.Module):
         convt2d = nn.ConvTranspose2d(self.hidden_dim,
                                      next_dim,
                                      pool_size, stride=pool_size)
-        act2d = nn.Tanh()
+        act2d = nn.LeakyReLU(0.2)
         bn2d = nn.BatchNorm2d(next_dim)
 
         # upsampling the feature vector
@@ -219,7 +219,7 @@ class ConvTransposeLSTM(nn.Module):
                                      (1, *pool_size),
                                      stride=(1, *pool_size))
 
-        act3d = nn.Tanh()
+        act3d = nn.LeakyReLU(0.2)
         bn3d = nn.BatchNorm3d(next_dim)
         self.upsample3d = nn.Sequential(convt3d, act3d, bn3d)
 

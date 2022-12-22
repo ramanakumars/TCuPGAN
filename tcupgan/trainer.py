@@ -4,10 +4,7 @@ import tqdm
 import glob
 from torch import optim
 from torch.optim.lr_scheduler import ExponentialLR
-from .losses import generator_seg_loss, generator_vae_loss,\
-    discriminator_loss, kl_loss
-#from .model import LSTMVAE, LSTMUNet
-
+from .losses import mink, kl_loss, adv_loss
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -25,13 +22,16 @@ class Trainer:
         self.generator = generator
         self.discriminator = discriminator
 
+        if savefolder[-1] != '/':
+            savefolder += '/'
+
         self.savefolder = savefolder
         if not os.path.exists(savefolder):
             os.mkdir(savefolder)
 
         self.start = 1
 
-    def train_batch(self, x, y=None):
+    def batch(self, x, y=None, train=False):
         '''
             Train the generator and discriminator on a single batch
         '''
@@ -39,108 +39,67 @@ class Trainer:
         input_img, target_img = x, y
 
         # convert the input image and mask to tensors
-        input_img = torch.as_tensor(input_img, dtype=torch.float).to(device)
-
-        if y is not None:
-            target_img = torch.as_tensor(
-                target_img, dtype=torch.float).to(device)
-        else:
-            target_img = torch.as_tensor(
-                input_img, dtype=torch.float).to(device)
-
+        img_tensor = torch.as_tensor(input_img, dtype=torch.float).to(device)
+        
+        x_mu, x_sig, x, c_mu, c_sig, c = self.generator.encode(img_tensor)
+        
+        gen_img = self.generator.decode(x, c)
+        
+        labels = torch.full((img_tensor.shape[0], img_tensor.shape[1], 1), 1, dtype=torch.float, device=device)
+        
         torch.autograd.set_detect_anomaly(True)
-        # get the generator (tversky) loss
-        if self.generator.gen_type == 'UNet':
-            generated_image = self.generator(input_img)
-            G_loss = generator_seg_loss(generated_image, target_img,
-                                        beta=self.fc_beta, gamma=self.fc_gamma)
-        elif isinstance(self.generator, LSTMVAE):
-            generated_image, c_mu, c_sig = self.generator(input_img)
-            G_VAE_loss = generator_vae_loss(generated_image, input_img)
-            G_KL_loss = kl_loss(c_mu, c_sig)
+        
+        # Train the generator
+        if train:
+            self.generator.zero_grad()
+        
+        disc_fake = self.discriminator(gen_img)
+        
+        gen_loss_MSE = mink(gen_img, img_tensor)
+        
+        gen_loss_KL_x = kl_loss(x_mu, x_sig)
+        gen_loss_KL_c = kl_loss(c_mu, c_sig)
+        gen_loss_KL = gen_loss_KL_x + gen_loss_KL_c
+        
+        gen_loss_disc = adv_loss(disc_fake, labels)
+        
+        gen_loss = gen_loss_MSE + gen_loss_disc + gen_loss_KL
 
-            G_loss = G_VAE_loss + self.kl_beta*G_KL_loss
-
-        # train the generator one batch
-        self.gen_optimizer.zero_grad()
-        G_loss.backward()
-        self.gen_optimizer.step()
-
+        if train:
+            gen_loss.backward()
+            self.gen_optimizer.step()
+        
         # Train the discriminator
-        disc_inp_fake = torch.cat((input_img, generated_image), 2)
-        disc_inp_real = torch.cat((input_img, target_img), 2)
+        # On the real image
+        if train:
+            self.discriminator.zero_grad()
+        disc_real = self.discriminator(img_tensor)
+        labels.fill_(1)
+        loss_real = adv_loss(disc_real, labels)
+    
+        if train:
+            loss_real.backward()
+        
+        # on the generated image
+        disc_fake = self.discriminator(gen_img.detach())
+        labels.fill_(0)
+        loss_fake = adv_loss(disc_fake, labels)
 
-        D_real = self.discriminator(disc_inp_real)
-        D_fake = self.discriminator(disc_inp_fake.detach())
+        if train: 
+            loss_fake.backward()
+        
+        disc_loss = loss_fake + loss_real
+    
+        if train:
+            self.disc_optimizer.step()
+        
+        keys = ['gen', 'MSE', 'gdisc', 'KL', 'discr', 'discf', 'disc']
+        mean_loss_i = [gen_loss.item(), gen_loss_MSE.item(), gen_loss_disc.item(),
+                       gen_loss_KL.item(), loss_real.item(), loss_fake.item(), disc_loss.item()]
+        
+        loss = {key: val for key, val in zip(keys, mean_loss_i)}
 
-        try:
-            D_fake_loss = discriminator_loss(D_fake, self.fake_target_train)
-            D_real_loss = discriminator_loss(D_real, self.real_target_train)
-        except Exception:
-            D_fake_loss = discriminator_loss(
-                D_fake, self.fake_target_train[:input_img.shape[0]])
-            D_real_loss = discriminator_loss(
-                D_real, self.real_target_train[:input_img.shape[0]])
-
-        D_total_loss = D_real_loss + D_fake_loss
-
-        self.disc_optimizer.zero_grad()
-        D_total_loss.backward()
-        self.disc_optimizer.step()
-
-        return G_loss, D_total_loss
-
-    def test_batch(self, x, y):
-        '''
-            Train the generator and discriminator on a single batch
-        '''
-        input_img, target_img = x, y
-
-        # convert the input image and mask to tensors
-        input_img = torch.as_tensor(input_img, dtype=torch.float).to(device)
-
-        if y is not None:
-            target_img = torch.as_tensor(
-                target_img, dtype=torch.float).to(device)
-        else:
-            target_img = torch.as_tensor(
-                input_img, dtype=torch.float).to(device)
-
-        # get the generator (tversky) loss
-        if self.generator.gen_type == 'UNet':
-            generated_image = self.generator(input_img)
-            G_loss = generator_seg_loss(generated_image, target_img,
-                                        beta=self.fc_beta, gamma=self.fc_gamma)
-        elif isinstance(self.generator, LSTMVAE):
-            generated_image, c_mu, c_sig = self.generator(input_img)
-            G_VAE_loss = generator_vae_loss(generated_image, input_img)
-            G_KL_loss = kl_loss(c_mu, c_sig)
-
-            G_loss = G_VAE_loss + self.kl_beta*G_KL_loss
-
-        # Train the discriminator
-        disc_inp_fake = torch.cat((input_img, generated_image), 2)
-        disc_inp_real = torch.cat((input_img, target_img), 2)
-
-        D_real = self.discriminator(disc_inp_real)
-        D_fake = self.discriminator(disc_inp_fake.detach())
-
-        try:
-            D_fake_loss = discriminator_loss(D_fake, self.fake_target_train)
-            D_real_loss = discriminator_loss(D_real, self.real_target_train)
-        except Exception:
-            D_fake_loss = discriminator_loss(
-                D_fake, self.fake_target_train[:input_img.shape[0]])
-            D_real_loss = discriminator_loss(
-                D_real, self.real_target_train[:input_img.shape[0]])
-
-        D_total_loss = D_real_loss + D_fake_loss
-
-        self.disc_optimizer.zero_grad()
-        D_total_loss.backward()
-        self.disc_optimizer.step()
-
-        return G_loss.cpu().item(), D_total_loss.cpu().item()
+        return loss
 
     def train(self, train_data, val_data, epochs, dsc_learning_rate=1.e-4,
               gen_learning_rate=1.e-3,
@@ -186,19 +145,8 @@ class Trainer:
         # create the Adam optimzers
         self.gen_optimizer = optim.Adam(
             self.generator.parameters(), lr=gen_learning_rate)
-        self.disc_optimizer = optim.Adam(
+        self.disc_optimizer = optim.Adagrad(
             self.discriminator.parameters(), lr=dsc_learning_rate)
-
-        # create the output data for the discriminator
-        self.real_target_train = torch.ones(
-            train_data.batch_size, 1, *self.disc_output).to(device)
-        self.fake_target_train = torch.zeros(
-            train_data.batch_size, 1, *self.disc_output).to(device)
-
-        self.real_target_val = torch.ones(
-            val_data.batch_size, 1, *self.disc_output).to(device)
-        self.fake_target_val = torch.zeros(
-            val_data.batch_size, 1, *self.disc_output).to(device)
 
         # set up the learning rate scheduler with exponential lr decay
         if lr_decay is not None:
@@ -239,11 +187,11 @@ class Trainer:
             for i, (input_img, target_img) in enumerate(pbar):
 
                 # train on this batch
-                gen_loss, disc_loss = self.train_batch(input_img, target_img)
+                losses = self.batch(input_img, target_img, train=True)
 
                 # append the current batch loss
-                D_loss[i] = disc_loss.item()
-                G_loss[i] = gen_loss.item()
+                D_loss[i] = losses['disc']
+                G_loss[i] = losses['gen']
 
                 mean_Gloss = torch.mean(G_loss[:i])
                 mean_Dloss = torch.mean(D_loss[:i])
@@ -269,12 +217,11 @@ class Trainer:
                 for i, (input_img, target_img) in enumerate(pbar):
 
                     # train on this batch
-                    gen_loss, disc_loss = self.test_batch(
-                        input_img, target_img)
+                    losses = self.batch(input_img, target_img, train=False)
 
                     # append the current batch loss
-                    D_loss[i] = disc_loss
-                    G_loss[i] = gen_loss
+                    D_loss[i] = losses['disc']
+                    G_loss[i] = losses['gen']
 
                     mean_Gloss = torch.mean(G_loss[:i])
                     mean_Dloss = torch.mean(D_loss[:i])
@@ -315,12 +262,17 @@ class Trainer:
             '/')[-1].replace('discriminator_ep_', '')[:-4]) for
             ch in disc_checkpoints])
 
-        self.start = max(gen_epochs.union(dsc_epochs))
 
-        assert len(gen_epochs) > 0, "No checkpoints found!"
+        try:
+            self.start = max(gen_epochs.union(dsc_epochs))
 
-        self.load(f"{self.savefolder}/generator_ep_{self.start:03d}.pth",
-                  f"{self.savefolder}/discriminator_ep_{self.start:03d}.pth")
+            assert len(gen_epochs) > 0, "No checkpoints found!"
+
+            self.load(f"{self.savefolder}/generator_ep_{self.start:03d}.pth",
+                      f"{self.savefolder}/discriminator_ep_{self.start:03d}.pth")
+        except Exception as e:
+            print(e)
+            print("Checkpoints not loaded")
 
     def load(self, generator_save, discriminator_save):
         print(generator_save, discriminator_save)

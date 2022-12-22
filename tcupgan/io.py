@@ -36,9 +36,9 @@ class DataGenerator:
         if len(img0.shape) == 3:
             self.d, self.h, self.w = img0.shape
         else:
-            self.d, _, self.h, self.w = img0.shape
+            self.nch, self.d, self.h, self.w = img0.shape
 
-        print(f"Found {self.ndata} images of shape {self.w}x{self.h}x{self.d}")
+        print(f"Found {self.ndata} images of shape {self.w}x{self.h}x{self.d} with {self.nch} channels")
 
     def __len__(self):
         return self.ndata // self.batch_size
@@ -49,7 +49,8 @@ class DataGenerator:
     def __getitem__(self, index):
         batch_indices = self.indices[index * self.batch_size:
                                      (index + 1) * self.batch_size]
-        return self.get_from_indices(batch_indices)
+        data = self.get_from_indices(batch_indices)
+        return data
     
     def get_from_indices(self, batch_indices):
         imgfiles = self.imgfiles[batch_indices]
@@ -72,15 +73,24 @@ class NpyDataGenerator(DataGenerator):
     def __getitem__(self, index):
         batch_indices = self.indices[index * self.batch_size:
                                      (index + 1) * self.batch_size]
+        
+        if index > len(self):
+            raise StopIteration
 
+        data = self.get_from_indices(batch_indices)
+
+        return data
+
+        
+    def get_from_indices(self, batch_indices):
         imgfiles = self.imgfiles[batch_indices]
 
-        imgs = np.zeros((self.batch_size, self.d, self.h, self.w))
+        imgs = np.zeros((len(imgfiles), self.d, self.nch, self.h, self.w))
 
-        for i in range(self.batch_size):
-            imgs[i, :] = np.load(imgfiles[i])
+        for i, imgi in enumerate(imgfiles):
+            imgs[i, :] = np.transpose(np.load(imgi), (1, 0, 2, 3))
 
-        return np.expand_dims(imgs, axis=2), None
+        return imgs, None
 
 
 def create_generators(img_datafolder, batch_size, inchannels=3,
