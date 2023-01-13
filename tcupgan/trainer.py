@@ -324,9 +324,14 @@ class TrainerUNet(Trainer):
         target_tensor = torch.as_tensor(target_img, dtype=torch.float).to(device)
         
         gen_img = self.generator(img_tensor)
-        disc_fake = self.discriminator(gen_img)
+
+
+        disc_inp_fake = torch.cat((img_tensor, gen_img), 1)
+        disc_inp_real = torch.cat((img_tensor, target_tensor), 1)
+
+        disc_fake = self.discriminator(disc_inp_fake)
         
-        labels = torch.full((img_tensor.shape[0], img_tensor.shape[1], *disc_fake.shape[2:]), 1, dtype=torch.float, device=device)
+        labels = torch.full((img_tensor.shape[0], *disc_fake.shape[1:]), 1, dtype=torch.float, device=device)
         
         torch.autograd.set_detect_anomaly(True)
         
@@ -348,7 +353,8 @@ class TrainerUNet(Trainer):
         # On the real image
         if train:
             self.discriminator.zero_grad()
-        disc_real = self.discriminator(img_tensor)
+
+        disc_real = self.discriminator(disc_inp_real)
         labels.fill_(1)
         loss_real = adv_loss(disc_real, labels)
     
@@ -356,7 +362,7 @@ class TrainerUNet(Trainer):
             loss_real.backward()
         
         # on the generated image
-        disc_fake = self.discriminator(gen_img.detach())
+        disc_fake = self.discriminator(disc_inp_fake.detach())
         labels.fill_(0)
         loss_fake = adv_loss(disc_fake, labels)
 
