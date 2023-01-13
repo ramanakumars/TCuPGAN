@@ -25,6 +25,7 @@ class DataGenerator:
         self.outchannels = outchannels
 
         self.norm = norm
+        self.perc_normalize = False
 
         # get info about the data
 
@@ -47,6 +48,9 @@ class DataGenerator:
         np.random.shuffle(self.indices)
 
     def __getitem__(self, index):
+        if index > len(self):
+            raise StopIteration
+
         batch_indices = self.indices[index * self.batch_size:
                                      (index + 1) * self.batch_size]
         data = self.get_from_indices(batch_indices)
@@ -70,25 +74,17 @@ class DataGenerator:
 class NpyDataGenerator(DataGenerator):
     file_type = 'npy'
 
-    def __getitem__(self, index):
-        batch_indices = self.indices[index * self.batch_size:
-                                     (index + 1) * self.batch_size]
-        
-        if index > len(self):
-            raise StopIteration
-
-        data = self.get_from_indices(batch_indices)
-
-        return data
-
-        
     def get_from_indices(self, batch_indices):
         imgfiles = self.imgfiles[batch_indices]
 
         imgs = np.zeros((len(imgfiles), self.d, self.nch, self.h, self.w))
 
         for i, imgi in enumerate(imgfiles):
-            imgs[i, :] = np.transpose(np.load(imgi), (1, 0, 2, 3))
+            imgi = np.load(imgi)
+            if self.perc_normalize:
+                imgi = imgi/np.percentile(imgi.flatten(), 98)
+
+            imgs[i, :] = np.transpose(imgi, (1, 0, 2, 3))
 
         return imgs, None
 

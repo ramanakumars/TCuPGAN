@@ -144,13 +144,24 @@ class LSTMVAE_old(nn.Module):
 class LSTMVAE(nn.Module):
     gen_type = 'VAE'
     def __init__(self, hidden_dims=[8, 16, 32], bottleneck_dims=[16, 8],
-                 input_channels=1, output_channels=4, input_size=(96, 96), final_act='elu'):
+                 input_channels=1, output_channels=4, input_size=(96, 96),
+                 batchnorm=False, final_act='elu'):
 
         super(LSTMVAE, self).__init__()
 
         self.hidden_dims = hidden_dims
-        prev_filt = input_channels
 
+        # create the encoder
+        conv_layers = []
+        conv_layers.append(nn.Conv3d(input_channels, 16, (1, 3, 3), (1, 1, 1), padding=(0, 1, 1)))
+        conv_layers.append(nn.LeakyReLU(0.2))
+        
+        conv_layers.append(nn.Conv3d(16, 32, (1, 3, 3), (1, 1, 1), padding=(0, 1, 1)))
+        conv_layers.append(nn.LeakyReLU(0.2))
+        
+        self.enc_conv_layers = nn.Sequential(*conv_layers)
+
+        prev_filt = 32
         # create the encoder
         encoder_layers = []
         for i in range(len(hidden_dims) - 1):
@@ -159,7 +170,7 @@ class LSTMVAE(nn.Module):
             # LSTM step, so we convolve to hidden_dims[i+1] filters and
             # max pool to downsample
             encoder_layers.append(ConvLSTM(prev_filt, hidden_dims[i],
-                                           hidden_dims[i + 1], (3, 3), (2, 2)))
+                                           hidden_dims[i + 1], (5, 5), (2, 2)))
             input_size = [ int(size / 2) for size in input_size]
 
             # update the filter value for the next iteration
@@ -178,12 +189,18 @@ class LSTMVAE(nn.Module):
         for j, filt in enumerate(bottleneck_dims):
             bottleneck_layers_enc_x.extend([
                 nn.Linear(prev_filt, filt),
-                nn.LeakyReLU(0.2)]) #nn.LeakyReLU(0.2),
+                nn.LeakyReLU(0.2),
+            ]) #nn.LeakyReLU(0.2),
                 #nn.BatchNorm2d(filt)])
             bottleneck_layers_enc_c.extend([
                 nn.Linear(prev_filt, filt),
-                nn.LeakyReLU(0.2)]) #nn.LeakyReLU(0.2),
+                nn.LeakyReLU(0.2),
+            ]) #nn.LeakyReLU(0.2),
             prev_filt = filt
+
+            if batchnorm:
+                bottleneck_layers_enc_x.append(nn.BatchNorm2d(filt))
+                bottleneck_layers_enc_c.append(nn.BatchNorm1d(filt))
 
         self.bottleneck_enc_x = nn.Sequential(*bottleneck_layers_enc_x)
         self.bottleneck_enc_c = nn.Sequential(*bottleneck_layers_enc_c)
@@ -196,11 +213,13 @@ class LSTMVAE(nn.Module):
         for j, filt in enumerate(decode_bottleneck):
             bottleneck_layers_dec_x.extend([
                 nn.Linear(prev_filt, filt),
-                nn.LeakyReLU(0.2)]) #nn.LeakyReLU(0.2),
+                nn.LeakyReLU(0.2),
+            ]) #nn.LeakyReLU(0.2),
                 #nn.BatchNorm1d(filt)])
             bottleneck_layers_dec_c.extend([
                 nn.Linear(prev_filt, filt),
-                nn.LeakyReLU(0.2)]) #nn.LeakyReLU(0.2),
+                nn.LeakyReLU(0.2),
+            ]) #nn.LeakyReLU(0.2),
             prev_filt = filt
 
         
@@ -211,7 +230,7 @@ class LSTMVAE(nn.Module):
 
         # invert the hidden layer filters for the decoder
         # also add the input channel at the end
-        decoder_hidden_dims = [*hidden_dims[::-1][1:], output_channels]
+        decoder_hidden_dims = [*hidden_dims[::-1][:-1]]
 
         # the starting size is the last filter size of the encoder
         hidden_dim = hidden_dims[-1]
@@ -224,24 +243,33 @@ class LSTMVAE(nn.Module):
             decoder_layers.append(ConvTransposeLSTM(decoder_hidden_dims[i],
                                                     hidden_dim,
                                                     decoder_hidden_dims[i + 1],
-                                                    (3, 3), (2, 2)))
+                                                    (5, 5), (2, 2)))
             #decoder_layers.append(UpSampleLSTM(decoder_hidden_dims[i] * 2,
             #                                        hidden_dim,
             #                                        decoder_hidden_dims[i + 1],
             #                                        (3, 3), (2, 2)))
             hidden_dim = decoder_hidden_dims[i + 1]
 
+        decoder_conv = []
+        decoder_conv.append(nn.ConvTranspose3d(hidden_dim, hidden_dims[0], (1, 4, 4), (1, 2, 2), padding=(0, 1, 1)))
+        decoder_conv.append(nn.LeakyReLU(0.2))
+        
+        decoder_conv.append(nn.ConvTranspose3d(hidden_dims[0], output_channels, (1, 3, 3), (1, 1, 1), padding=(0, 1, 1)))
+
         if final_act == 'elu':
-            self.pred_final = nn.ELU()
+            decoder_conv.append(nn.ELU())
         else:
-            self.pred_final = nn.Sigmoid()
+            decoder_conv.append(nn.Sigmoid())
 
         self.decoder_layers = nn.ModuleList(decoder_layers)
+        self.decoder_conv = nn.Sequential(*decoder_conv)
 
     def encode(self, x):
         '''
             Create the vector embedding
         '''
+        x = torch.swapaxes(self.enc_conv_layers(torch.swapaxes(x, 1, 2)), 1, 2)
+
         c = None
         for i, layer in enumerate(self.encoder_layers):
             if i == 0:
@@ -291,7 +319,10 @@ class LSTMVAE(nn.Module):
             x, c = layer(x, c=c)
 
         # smooth the final output mask to remove the gridding
-        x = self.pred_final(x)
+        x = torch.swapaxes(
+                self.decoder_conv(
+                    torch.swapaxes(x, 1, 2)
+                ), 1, 2)
 
         return x
 

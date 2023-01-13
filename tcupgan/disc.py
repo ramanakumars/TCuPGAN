@@ -142,9 +142,9 @@ class ConvDiscriminator(nn.Module):
             layers.append(nn.Conv3d(prev_filt, next_filt, (1, 3, 3),
                                     stride=(1, 1, 1),
                                     padding=(0, 1, 1)))
-            layers.append(nn.Tanh())
-            layers.append(nn.MaxPool3d((1, 2, 2)))
+            layers.append(nn.ELU())
             layers.append(nn.BatchNorm3d(next_filt))
+            layers.append(nn.MaxPool3d((1, 2, 2)))
             #layers.append(ConvLSTM(prev_filt, hidden[i],
             #                               hidden[i + 1], (3, 3), (2, 2)))
 
@@ -161,7 +161,7 @@ class ConvDiscriminator(nn.Module):
         pred_layers = []
         # last predictive layer
         pred_layers.append(nn.Linear(prev_filt*inp_size[0]*inp_size[1], bottleneck_dim))
-        pred_layers.append(nn.Tanh())
+        pred_layers.append(nn.ELU())
 
         pred_layers.append(nn.Linear(bottleneck_dim, 1))
         pred_layers.append(nn.Sigmoid())

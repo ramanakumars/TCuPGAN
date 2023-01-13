@@ -4,7 +4,7 @@ import tqdm
 import glob
 from torch import optim
 from torch.optim.lr_scheduler import ExponentialLR
-from .losses import mink, kl_loss, adv_loss
+from .losses import mink, kl_loss, adv_loss, fc_tversky
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -19,6 +19,10 @@ class Trainer:
         '''
             Store the generator and discriminator info
         '''
+
+        generator.apply(weights_init)
+        discriminator.apply(weights_init)
+
         self.generator = generator
         self.discriminator = discriminator
 
@@ -152,12 +156,14 @@ class Trainer:
         if lr_decay is not None:
             gen_scheduler = ExponentialLR(self.gen_optimizer, gamma=lr_decay)
             dsc_scheduler = ExponentialLR(self.disc_optimizer, gamma=lr_decay)
+            gen_lr = gen_learning_rate*( (self.start - 1)/(decay_freq) )**(lr_decay)
+            dsc_lr = dsc_learning_rate*( (self.start - 1)/(decay_freq) )**(lr_decay)
         else:
             gen_scheduler = None
             dsc_scheduler = None
+            gen_lr = gen_learning_rate
+            dsc_lr = dsc_learning_rate
 
-        gen_lr = gen_learning_rate
-        dsc_lr = dsc_learning_rate
 
         # empty lists for storing epoch loss data
         D_loss_ep, G_loss_ep = [], []
@@ -264,12 +270,12 @@ class Trainer:
 
 
         try:
-            self.start = max(gen_epochs.union(dsc_epochs))
-
             assert len(gen_epochs) > 0, "No checkpoints found!"
 
-            self.load(f"{self.savefolder}/generator_ep_{self.start:03d}.pth",
-                      f"{self.savefolder}/discriminator_ep_{self.start:03d}.pth")
+            start = max(gen_epochs.union(dsc_epochs))
+            self.load(f"{self.savefolder}/generator_ep_{start:03d}.pth",
+                      f"{self.savefolder}/discriminator_ep_{start:03d}.pth")
+            self.start = start
         except Exception as e:
             print(e)
             print("Checkpoints not loaded")
@@ -283,3 +289,89 @@ class Trainer:
         dfname = discriminator_save.split('/')[-1]
         print(
             f"Loaded checkpoints from {gfname} and {dfname}")
+
+# custom weights initialization called on generator and discriminator
+# scaling here means std
+def weights_init(net, init_type='normal', scaling=0.02):
+    """Initialize network weights.
+    Parameters:
+        net (network)   -- network to be initialized
+        init_type (str) -- the name of an initialization method: normal | xavier | kaiming | orthogonal
+        init_gain (float)    -- scaling factor for normal, xavier and orthogonal.
+    We use 'normal' in the original pix2pix and CycleGAN paper. But xavier and kaiming might
+    work better for some applications. Feel free to try yourself.
+    """
+    def init_func(m):  # define the initialization function
+        classname = m.__class__.__name__
+        if hasattr(m, 'weight') and (classname.find('Conv')) != -1:
+            torch.nn.init.normal_(m.weight.data, 0.0, scaling)
+        # BatchNorm Layer's weight is not a matrix; only normal distribution applies.
+        elif classname.find('BatchNorm') != -1:
+            torch.nn.init.normal_(m.weight.data, 1.0, scaling)
+            torch.nn.init.constant_(m.bias.data, 0.0)
+
+
+class TrainerUNet(Trainer):
+    def batch(self, x, y, train=False):
+        '''
+            Train the generator and discriminator on a single batch
+        '''
+
+        input_img, target_img = x, y
+
+        # convert the input image and mask to tensors
+        img_tensor = torch.as_tensor(input_img, dtype=torch.float).to(device)
+        target_tensor = torch.as_tensor(target_img, dtype=torch.float).to(device)
+        
+        gen_img = self.generator(img_tensor)
+        disc_fake = self.discriminator(gen_img)
+        
+        labels = torch.full((img_tensor.shape[0], img_tensor.shape[1], *disc_fake.shape[2:]), 1, dtype=torch.float, device=device)
+        
+        torch.autograd.set_detect_anomaly(True)
+        
+        # Train the generator
+        if train:
+            self.generator.zero_grad()
+        
+        gen_loss_tversky = fc_tversky(target_tensor, gen_img)
+        
+        gen_loss_disc = adv_loss(disc_fake, labels)
+        
+        gen_loss = gen_loss_tversky + gen_loss_disc
+
+        if train:
+            gen_loss.backward()
+            self.gen_optimizer.step()
+        
+        # Train the discriminator
+        # On the real image
+        if train:
+            self.discriminator.zero_grad()
+        disc_real = self.discriminator(img_tensor)
+        labels.fill_(1)
+        loss_real = adv_loss(disc_real, labels)
+    
+        if train:
+            loss_real.backward()
+        
+        # on the generated image
+        disc_fake = self.discriminator(gen_img.detach())
+        labels.fill_(0)
+        loss_fake = adv_loss(disc_fake, labels)
+
+        if train: 
+            loss_fake.backward()
+        
+        disc_loss = loss_fake + loss_real
+    
+        if train:
+            self.disc_optimizer.step()
+        
+        keys = ['gen', 'tversky', 'gdisc', 'discr', 'discf', 'disc']
+        mean_loss_i = [gen_loss.item(), gen_loss_tversky.item(), gen_loss_disc.item(),
+                       loss_real.item(), loss_fake.item(), disc_loss.item()]
+        
+        loss = {key: val for key, val in zip(keys, mean_loss_i)}
+
+        return loss
