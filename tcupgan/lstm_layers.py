@@ -298,4 +298,4 @@ class UpSampleLSTM(nn.Module):
         #c = self.upsample2d(c)  # , self.upsample2d)
         output_feature = apply_on_channel(output_feature, self.upsample)
 
-        return output_feature
+        return output_feature, None

@@ -1,6 +1,6 @@
 import torch.nn as nn
 import torch
-from .lstm_layers import (ConvLSTM, UpSampleLSTM)
+from .lstm_layers import (ConvLSTM, UpSampleLSTM, ConvTransposeLSTM, apply_on_channel)
 
 class LSTMUNet(nn.Module):
     gen_type = 'UNet'
@@ -55,7 +55,7 @@ class LSTMUNet(nn.Module):
 
         # invert the hidden layer filters for the decoder
         # also add the input channel at the end
-        decoder_hidden_dims = [*hidden_dims[::-1][1:], output_channels]
+        decoder_hidden_dims = hidden_dims[::-1]
 
         # the starting size is the last filter size of the encoder
         hidden_dim = hidden_dims[-1]
@@ -69,16 +69,20 @@ class LSTMUNet(nn.Module):
             #                                        hidden_dim,
             #                                        decoder_hidden_dims[i + 1],
             #                                        (3, 3), (2, 2)))
-            decoder_layers.append(UpSampleLSTM(decoder_hidden_dims[i] * 2,
-                                                    hidden_dim,
-                                                    decoder_hidden_dims[i + 1],
+            l1 = decoder_hidden_dims[i] + decoder_hidden_dims[i+1]
+            l2 = hidden_dim
+            l3 = decoder_hidden_dims[i+1]
+
+            decoder_layers.append(UpSampleLSTM(l1, l2, l3, 
                                                     (3, 3), (2, 2)))
             hidden_dim = decoder_hidden_dims[i + 1]
 
+        conv_final = nn.Conv3d(hidden_dim, output_channels, (1, 3, 3), stride=(1, 1, 1), padding=(0, 1, 1))
         if output_channels > 1:
-            self.pred_final = nn.Softmax(dim=2)
+            final_act = nn.Softmax(dim=2)
         else:
-            self.pred_final = nn.Sigmoid()
+            final_act = nn.Sigmoid()
+        self.pred_final = nn.Sequential(conv_final, final_act)
 
         self.decoder_layers = nn.ModuleList(decoder_layers)
 
@@ -121,12 +125,9 @@ class LSTMUNet(nn.Module):
             else:
                 hidden = [None, c]
 
-            hidden = None
-
             x, c = layer(x, hidden)
             cencs.append(c)
             xencs.append(x)
-            #print(c.shape)
 
         x = torch.swapaxes(x, 1, 2)
         # bottleneck the c dimension
@@ -136,15 +137,22 @@ class LSTMUNet(nn.Module):
         dec_x = self.bottleneck_dec(enc_x)
         x = torch.swapaxes(dec_x, 1, 2)
 
+        xencs = xencs[::-1]
+        cencs = cencs[::-1]
+
         nlayers = len(self.decoder_layers)
         for i, layer in enumerate(self.decoder_layers):
             # skip the x vector across the bottleneck
-            xconc = torch.cat([x, xencs[nlayers - i - 1]], dim=2)
-            #henc = xencs[nlayers-i-1][:,0,:,:,:]
-            x = layer(xconc, c=cencs[nlayers -i -1])
+            xenci = xencs[i]
+            cenci = cencs[i]
+            xconc = torch.cat([x, xenci], dim=2)
+
+            x, _ = layer(xconc, c=cenci)
 
         # smooth the final output mask to remove the gridding
-        x = self.pred_final(x)
+        x = self.pred_final(torch.swapaxes(x, 1, 2))
+
+        x = torch.swapaxes(x, 1, 2)
 
         return x
 
