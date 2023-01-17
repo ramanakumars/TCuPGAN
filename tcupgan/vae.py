@@ -1,6 +1,6 @@
 import torch.nn as nn
 import torch
-from .lstm_layers import ConvLSTM, ConvTransposeLSTM
+from .lstm_layers import ConvLSTM, ConvTransposeLSTM, UpSampleLSTM
 
 
 def sample(mu, log_var):
@@ -240,7 +240,7 @@ class LSTMVAE(nn.Module):
             # in the UNet we also skip across the bottleneck, so the input is
             # the cat of both the skipped vector and the upsampling vector
 
-            decoder_layers.append(ConvTransposeLSTM(decoder_hidden_dims[i],
+            decoder_layers.append(UpSampleLSTM(decoder_hidden_dims[i],
                                                     hidden_dim,
                                                     decoder_hidden_dims[i + 1],
                                                     (5, 5), (2, 2)))

@@ -258,12 +258,14 @@ class UpSampleLSTM(nn.Module):
                                       hidden_dim=self.hidden_dim,
                                       kernel_size=self.kernel_size)
 
+        padding = kernel_size[0] // 2
+
         # for upsampling the hidden vectors
-        us2d = nn.Upsample(scale_factor=(1, *pool_size))
-        conv2d = nn.Conv3d(self.hidden_dim,
-                            next_dim, (1, *kernel_size), stride=1, padding=(0, 1, 1))
+        us2d = nn.Upsample(scale_factor=pool_size)
+        conv2d = nn.Conv2d(self.hidden_dim,
+                            next_dim, kernel_size, stride=1, padding=padding)
         act2d = nn.ReLU(True)
-        bn2d = nn.BatchNorm3d(next_dim)
+        bn2d = nn.BatchNorm2d(next_dim)
 
         # upsampling the feature vector
         '''
@@ -295,7 +297,7 @@ class UpSampleLSTM(nn.Module):
         output_feature, c = self.lstmlayer(x, hidden_state)
 
         # apply max pooling on the LSTM result
-        #c = self.upsample2d(c)  # , self.upsample2d)
-        output_feature = apply_on_channel(output_feature, self.upsample)
+        c = self.upsample(c)  # , self.upsample2d)
+        output_feature = time_distribute(output_feature, self.upsample)
 
-        return output_feature
+        return output_feature, c
