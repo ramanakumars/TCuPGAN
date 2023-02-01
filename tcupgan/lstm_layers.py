@@ -264,23 +264,21 @@ class UpSampleLSTM(nn.Module):
         us2d = nn.Upsample(scale_factor=pool_size)
         conv2d = nn.Conv2d(self.hidden_dim,
                             next_dim, kernel_size, stride=1, padding=padding)
-        act2d = nn.ReLU(True)
-        bn2d = nn.BatchNorm2d(next_dim)
+        act2d = nn.LeakyReLU(0.2)
+        #bn2d = nn.BatchNorm2d(next_dim)
+        self.upsample2d = nn.Sequential(us2d, conv2d, act2d)
 
         # upsampling the feature vector
-        '''
         us3d = nn.Upsample(scale_factor=(1, *pool_size))
         conv3d = nn.Conv3d(self.hidden_dim,
                              next_dim,
                              (1, *kernel_size),
-                             stride=1, padding=(0, 1, 1))
+                             stride=1, padding=(0, padding, padding))
 
-        act3d = nn.Tanh()
-        bn3d = nn.BatchNorm3d(next_dim)
-        self.upsample3d = nn.Sequential(us3d, conv3d, act3d, bn3d)
-        '''
+        act3d = nn.LeakyReLU(0.2)
+        #bn3d = nn.BatchNorm3d(next_dim)
+        self.upsample3d = nn.Sequential(us3d, conv3d, act3d)
 
-        self.upsample = nn.Sequential(us2d, conv2d, act2d, bn2d)
 
     def forward(self, x, h=None, c=None):
         '''
@@ -297,7 +295,7 @@ class UpSampleLSTM(nn.Module):
         output_feature, c = self.lstmlayer(x, hidden_state)
 
         # apply max pooling on the LSTM result
-        c = self.upsample(c)  # , self.upsample2d)
-        output_feature = time_distribute(output_feature, self.upsample)
+        c = self.upsample2d(c)  # , self.upsample2d)
+        output_feature = torch.swapaxes(self.upsample3d(torch.swapaxes(output_feature, 1, 2)), 1, 2)
 
         return output_feature, c
