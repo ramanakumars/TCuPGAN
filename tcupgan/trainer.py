@@ -1,7 +1,9 @@
 import torch
 import os
 import tqdm
+import numpy as np
 import glob
+from collections import defaultdict
 from torch import optim
 from torch.optim.lr_scheduler import ExponentialLR
 from .losses import mink, kl_loss, adv_loss, fc_tversky
@@ -40,7 +42,7 @@ class Trainer:
             Train the generator and discriminator on a single batch
         '''
 
-        input_img, target_img = x, y
+        input_img, _ = x, y
 
         # convert the input image and mask to tensors
         img_tensor = torch.as_tensor(input_img, dtype=torch.float).to(device)
@@ -145,24 +147,26 @@ class Trainer:
             D_loss_plot : numpy.ndarray
                 Discriminator loss history as a function of the epochs
         '''
+        if lr_decay is not None:
+            gen_lr = gen_learning_rate*(lr_decay)**( (self.start - 1)/(decay_freq) )
+            dsc_lr = dsc_learning_rate*(lr_decay)**( (self.start - 1)/(decay_freq) )
+        else:
+            gen_lr = gen_learning_rate
+            dsc_lr = dsc_learning_rate
 
         # create the Adam optimzers
         self.gen_optimizer = optim.Adam(
-            self.generator.parameters(), lr=gen_learning_rate)
+            self.generator.parameters(), lr=gen_lr)
         self.disc_optimizer = optim.Adagrad(
-            self.discriminator.parameters(), lr=dsc_learning_rate)
+            self.discriminator.parameters(), lr=dsc_lr)
 
         # set up the learning rate scheduler with exponential lr decay
         if lr_decay is not None:
             gen_scheduler = ExponentialLR(self.gen_optimizer, gamma=lr_decay)
             dsc_scheduler = ExponentialLR(self.disc_optimizer, gamma=lr_decay)
-            gen_lr = gen_learning_rate*( (self.start - 1)/(decay_freq) )**(lr_decay)
-            dsc_lr = dsc_learning_rate*( (self.start - 1)/(decay_freq) )**(lr_decay)
         else:
             gen_scheduler = None
             dsc_scheduler = None
-            gen_lr = gen_learning_rate
-            dsc_lr = dsc_learning_rate
 
 
         # empty lists for storing epoch loss data
@@ -179,7 +183,7 @@ class Trainer:
             print("-------------------------------------------------------")
 
             # batch loss data
-            pbar = tqdm.tqdm(train_data, desc='Training: ')
+            pbar = tqdm.tqdm(train_data, desc='Training: ', dynamic_ncols=True)
 
             train_data.shuffle()
 
@@ -187,27 +191,26 @@ class Trainer:
             self.generator.train()
             self.discriminator.train()
 
-            D_loss = torch.zeros(len(train_data) + 1).to(device)
-            G_loss = torch.zeros(len(train_data) + 1).to(device)
+            losses = defaultdict(list)
             # loop through the training data
             for i, (input_img, target_img) in enumerate(pbar):
 
                 # train on this batch
-                losses = self.batch(input_img, target_img, train=True)
+                batch_loss = self.batch(input_img, target_img, train=True)
 
                 # append the current batch loss
-                D_loss[i] = losses['disc']
-                G_loss[i] = losses['gen']
+                loss_mean = {}
+                for key, value in batch_loss.items():
+                    losses[key].append(value)
+                    loss_mean[key] = np.mean(losses[key], axis=0)
 
-                mean_Gloss = torch.mean(G_loss[:i])
-                mean_Dloss = torch.mean(D_loss[:i])
+                loss_str = " ".join([f"{key}: {value:.2e}" for key, value in loss_mean.items()])
 
-                pbar.set_postfix_str(
-                    f"gen: {mean_Gloss:.3e} disc {mean_Dloss:.3e}")
+                pbar.set_postfix_str(loss_str)
 
             # update the epoch loss
-            D_loss_ep.append(torch.mean(D_loss).cpu().item())
-            G_loss_ep.append(torch.mean(G_loss).cpu().item())
+            D_loss_ep.append(loss_mean['disc'])
+            G_loss_ep.append(loss_mean['gen'])
 
             if epoch % validation_freq == 0:
                 # validate every `validation_freq` epochs
@@ -217,23 +220,21 @@ class Trainer:
 
                 val_data.shuffle()
 
-                D_loss = torch.zeros(len(val_data) + 1).to(device)
-                G_loss = torch.zeros(len(val_data) + 1).to(device)
+                losses = defaultdict(list)
                 # loop through the training data
                 for i, (input_img, target_img) in enumerate(pbar):
 
                     # train on this batch
-                    losses = self.batch(input_img, target_img, train=False)
+                    batch_loss = self.batch(input_img, target_img, train=False)
 
-                    # append the current batch loss
-                    D_loss[i] = losses['disc']
-                    G_loss[i] = losses['gen']
+                    loss_mean = {}
+                    for key, value in batch_loss.items():
+                        losses[key].append(value)
+                        loss_mean[key] = np.mean(losses[key], axis=0)
 
-                    mean_Gloss = torch.mean(G_loss[:i])
-                    mean_Dloss = torch.mean(D_loss[:i])
+                    loss_str = " ".join([f"{key}: {value:.3e}" for key, value in loss_mean.items()])
 
-                    pbar.set_postfix_str(
-                        f'gen: {mean_Gloss:.3e} disc {mean_Dloss:.3e}')
+                    pbar.set_postfix_str(loss_str)
 
             # apply learning rate decay
             if (gen_scheduler is not None) & (dsc_scheduler is not None):
