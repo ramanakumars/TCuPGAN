@@ -5,7 +5,7 @@ import numpy as np
 import glob
 from collections import defaultdict
 from torch import optim
-from torch.optim.lr_scheduler import ExponentialLR
+from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau
 from .losses import mink, kl_loss, adv_loss, fc_tversky
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -16,6 +16,8 @@ class Trainer:
         Trainer module which contains both the full training driver
         which calls the train_batch method
     '''
+
+    kl_beta = 0.5
 
     def __init__(self, generator, discriminator, savefolder):
         '''
@@ -65,7 +67,7 @@ class Trainer:
         
         gen_loss_KL_x = kl_loss(x_mu, x_sig)
         gen_loss_KL_c = kl_loss(c_mu, c_sig)
-        gen_loss_KL = gen_loss_KL_x + gen_loss_KL_c
+        gen_loss_KL = self.kl_beta * (gen_loss_KL_x + gen_loss_KL_c)
         
         gen_loss_disc = adv_loss(disc_fake, labels)
         
@@ -108,8 +110,7 @@ class Trainer:
         return loss
 
     def train(self, train_data, val_data, epochs, dsc_learning_rate=1.e-4,
-              gen_learning_rate=1.e-3,
-              validation_freq=5, save_freq=10, lr_decay=None, decay_freq=5):
+              gen_learning_rate=1.e-3, save_freq=10, lr_decay=None, decay_freq=5, reduce_on_plateau=False):
         '''
             Training driver which loads the optimizer and calls the
             `train_batch` method. Also handles checkpoint saving
@@ -127,9 +128,6 @@ class Trainer:
                 Initial learning rate for the discriminator
             gen_learning_rate : float [default: 1e-3]
                 Initial learning rate for the generator
-            validation_freq : int [default: 5]
-                Frequency at which to validate the model using the
-                validation data
             save_freq : int [default: 10]
                 Frequency at which to save checkpoints to the save folder
             lr_decay : float [default: None]
@@ -147,7 +145,7 @@ class Trainer:
             D_loss_plot : numpy.ndarray
                 Discriminator loss history as a function of the epochs
         '''
-        if lr_decay is not None:
+        if (lr_decay is not None) and not reduce_on_plateau:
             gen_lr = gen_learning_rate*(lr_decay)**( (self.start - 1)/(decay_freq) )
             dsc_lr = dsc_learning_rate*(lr_decay)**( (self.start - 1)/(decay_freq) )
         else:
@@ -161,7 +159,10 @@ class Trainer:
             self.discriminator.parameters(), lr=dsc_lr)
 
         # set up the learning rate scheduler with exponential lr decay
-        if lr_decay is not None:
+        if reduce_on_plateau:
+            gen_scheduler = ReduceLROnPlateau(self.gen_optimizer, verbose=True)
+            dsc_scheduler = ReduceLROnPlateau(self.disc_optimizer, verbose=True)
+        elif lr_decay is not None:
             gen_scheduler = ExponentialLR(self.gen_optimizer, gamma=lr_decay)
             dsc_scheduler = ExponentialLR(self.disc_optimizer, gamma=lr_decay)
         else:
@@ -172,7 +173,7 @@ class Trainer:
         # empty lists for storing epoch loss data
         D_loss_ep, G_loss_ep = [], []
         for epoch in range(self.start, epochs + 1):
-            if (gen_scheduler is not None) & (dsc_scheduler is not None):
+            if isinstance(gen_scheduler, ExponentialLR):
                 gen_lr = gen_scheduler.get_last_lr()[0]
                 dsc_lr = dsc_scheduler.get_last_lr()[0]
             else:
@@ -212,35 +213,38 @@ class Trainer:
             D_loss_ep.append(loss_mean['disc'])
             G_loss_ep.append(loss_mean['gen'])
 
-            if epoch % validation_freq == 0:
-                # validate every `validation_freq` epochs
-                self.discriminator.eval()
-                self.generator.eval()
-                pbar = tqdm.tqdm(val_data, desc='Validation: ')
+            # validate every `validation_freq` epochs
+            self.discriminator.eval()
+            self.generator.eval()
+            pbar = tqdm.tqdm(val_data, desc='Validation: ')
 
-                val_data.shuffle()
+            val_data.shuffle()
 
-                losses = defaultdict(list)
-                # loop through the training data
-                for i, (input_img, target_img) in enumerate(pbar):
+            losses = defaultdict(list)
+            # loop through the training data
+            for i, (input_img, target_img) in enumerate(pbar):
 
-                    # train on this batch
-                    batch_loss = self.batch(input_img, target_img, train=False)
+                # train on this batch
+                batch_loss = self.batch(input_img, target_img, train=False)
 
-                    loss_mean = {}
-                    for key, value in batch_loss.items():
-                        losses[key].append(value)
-                        loss_mean[key] = np.mean(losses[key], axis=0)
+                loss_mean = {}
+                for key, value in batch_loss.items():
+                    losses[key].append(value)
+                    loss_mean[key] = np.mean(losses[key], axis=0)
 
-                    loss_str = " ".join([f"{key}: {value:.3e}" for key, value in loss_mean.items()])
+                loss_str = " ".join([f"{key}: {value:.3e}" for key, value in loss_mean.items()])
 
-                    pbar.set_postfix_str(loss_str)
+                pbar.set_postfix_str(loss_str)
 
             # apply learning rate decay
             if (gen_scheduler is not None) & (dsc_scheduler is not None):
-                if epoch % decay_freq == 0:
-                    gen_scheduler.step()
-                    dsc_scheduler.step()
+                if isinstance(gen_scheduler, ExponentialLR):
+                    if epoch % decay_freq == 0:
+                        gen_scheduler.step()
+                        dsc_scheduler.step()
+                else:
+                    gen_scheduler.step(loss_mean['gen'])
+                    dsc_scheduler.step(loss_mean['disc'])
 
             # save checkpoints
             if epoch % save_freq == 0:
@@ -276,7 +280,7 @@ class Trainer:
             start = max(gen_epochs.union(dsc_epochs))
             self.load(f"{self.savefolder}/generator_ep_{start:03d}.pth",
                       f"{self.savefolder}/discriminator_ep_{start:03d}.pth")
-            self.start = start
+            self.start = start + 1
         except Exception as e:
             print(e)
             print("Checkpoints not loaded")
