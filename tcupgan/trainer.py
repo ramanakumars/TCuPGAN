@@ -19,6 +19,8 @@ class Trainer:
 
     kl_beta = 0.5
 
+    neptune_config = None
+
     def __init__(self, generator, discriminator, savefolder):
         '''
             Store the generator and discriminator info
@@ -145,12 +147,18 @@ class Trainer:
             D_loss_plot : numpy.ndarray
                 Discriminator loss history as a function of the epochs
         '''
+
         if (lr_decay is not None) and not reduce_on_plateau:
             gen_lr = gen_learning_rate*(lr_decay)**( (self.start - 1)/(decay_freq) )
             dsc_lr = dsc_learning_rate*(lr_decay)**( (self.start - 1)/(decay_freq) )
         else:
             gen_lr = gen_learning_rate
             dsc_lr = dsc_learning_rate
+
+        self.neptune_config['model/parameters/gen_learning_rate'] = gen_lr
+        self.neptune_config['model/parameters/dsc_learning_rate'] = dsc_lr
+        self.neptune_config['model/parameters/start'] = self.start
+        self.neptune_config['model/parameters/n_epochs'] = epochs
 
         # create the Adam optimzers
         self.gen_optimizer = optim.Adam(
@@ -162,9 +170,13 @@ class Trainer:
         if reduce_on_plateau:
             gen_scheduler = ReduceLROnPlateau(self.gen_optimizer, verbose=True)
             dsc_scheduler = ReduceLROnPlateau(self.disc_optimizer, verbose=True)
+            self.neptune_config['model/parameters/scheduler'] = 'ReduceLROnPlateau'
         elif lr_decay is not None:
             gen_scheduler = ExponentialLR(self.gen_optimizer, gamma=lr_decay)
             dsc_scheduler = ExponentialLR(self.disc_optimizer, gamma=lr_decay)
+            self.neptune_config['model/parameters/scheduler'] = 'ExponentialLR'
+            self.neptune_config['model/parameters/decay_freq'] = decay_freq
+            self.neptune_config['model/parameters/lr_decay'] = lr_decay
         else:
             gen_scheduler = None
             dsc_scheduler = None
@@ -213,6 +225,10 @@ class Trainer:
             D_loss_ep.append(loss_mean['disc'])
             G_loss_ep.append(loss_mean['gen'])
 
+            if self.neptune_config is not None:
+                self.neptune_config['train/gen_loss'].append(loss_mean['gen'])
+                self.neptune_config['train/disc_loss'].append(loss_mean['disc'])
+
             # validate every `validation_freq` epochs
             self.discriminator.eval()
             self.generator.eval()
@@ -232,9 +248,13 @@ class Trainer:
                     losses[key].append(value)
                     loss_mean[key] = np.mean(losses[key], axis=0)
 
-                loss_str = " ".join([f"{key}: {value:.3e}" for key, value in loss_mean.items()])
+                loss_str = " ".join([f"{key}: {value:.2e}" for key, value in loss_mean.items()])
 
                 pbar.set_postfix_str(loss_str)
+            
+            if self.neptune_config is not None:
+                self.neptune_config['eval/gen_loss'].append(loss_mean['gen'])
+                self.neptune_config['eval/disc_loss'].append(loss_mean['disc'])
 
             # apply learning rate decay
             if (gen_scheduler is not None) & (dsc_scheduler is not None):
