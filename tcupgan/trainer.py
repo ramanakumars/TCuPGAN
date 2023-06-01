@@ -375,15 +375,15 @@ class TrainerUNet(Trainer):
 
         disc_inp_real = torch.cat((img_tensor, target_tensor), 2)
         disc_real = self.discriminator(disc_inp_real)
-        
+
         disc_inp_fake = torch.cat((img_tensor, gen_img.detach()), 2)
         disc_fake = self.discriminator(disc_inp_fake)
-        
+
         real_labels = torch.ones_like(disc_fake)
         fake_labels = torch.zeros_like(disc_fake)
         loss_real = adv_loss(disc_real, real_labels)
         loss_fake = adv_loss(disc_fake, fake_labels)
-        
+
         disc_loss = (loss_fake + loss_real) / 2.
 
         if train:

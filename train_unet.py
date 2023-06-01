@@ -1,11 +1,6 @@
 from tcupgan import LSTMUNet, PatchDiscriminator, create_generators
-from tcupgan.losses import fc_tversky
 from tcupgan.trainer import Trainer
 from torchinfo import summary
-import torch
-import tqdm
-import numpy as np
-from torch.optim.lr_scheduler import ExponentialLR
 
 
 device = 'cuda'
@@ -26,15 +21,11 @@ summary(discriminator, input_size=(1, 155, 8, 128, 128), device=device)
 
 
 trainer = Trainer(generator, discriminator, 'checkpoints.resized-gamma05/')
-trainer.fc_beta = 0.7
-trainer.fc_gamma = 0.5
-trainer.disc_output = [19, 16, 16]
+# trainer.load_last_checkpoint()
 
-#trainer.load_last_checkpoint()
+gen_learning_rate = 1.e-3
+dsc_learning_rate = 1.e-4
 
-gen_learning_rate = 1.e-3*(0.95)**(trainer.start/5)
-dsc_learning_rate = 1.e-4*(0.95)**(trainer.start/5)
-
-trainer.train(train_data, val_data, 150, lr_decay=0.95, 
+trainer.train(train_data, val_data, 150, lr_decay=0.95,
               dsc_learning_rate=dsc_learning_rate,
               gen_learning_rate=gen_learning_rate)
