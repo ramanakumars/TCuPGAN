@@ -19,6 +19,8 @@ class Trainer:
 
     kl_beta = 0.5
 
+    disc_alpha = 0.05
+
     neptune_config = None
 
     def __init__(self, generator, discriminator, savefolder):
@@ -50,35 +52,35 @@ class Trainer:
 
         # convert the input image and mask to tensors
         img_tensor = torch.as_tensor(input_img, dtype=torch.float).to(device)
-        
+
         x_mu, x_sig, x, c_mu, c_sig, c = self.generator.encode(img_tensor)
-        
+
         gen_img = self.generator.decode(x, c)
-        
+
         labels = torch.full((img_tensor.shape[0], img_tensor.shape[1], 1), 1, dtype=torch.float, device=device)
-        
+
         torch.autograd.set_detect_anomaly(True)
-        
+
         # Train the generator
         if train:
             self.generator.zero_grad()
-        
+
         disc_fake = self.discriminator(gen_img)
-        
+
         gen_loss_MSE = mink(gen_img, img_tensor)
-        
+
         gen_loss_KL_x = kl_loss(x_mu, x_sig)
         gen_loss_KL_c = kl_loss(c_mu, c_sig)
         gen_loss_KL = self.kl_beta * (gen_loss_KL_x + gen_loss_KL_c)
-        
+
         gen_loss_disc = adv_loss(disc_fake, labels)
-        
-        gen_loss = gen_loss_MSE + gen_loss_disc + gen_loss_KL
+
+        gen_loss = gen_loss_MSE + self.disc_alpha * gen_loss_disc + gen_loss_KL
 
         if train:
             gen_loss.backward()
             self.gen_optimizer.step()
-        
+
         # Train the discriminator
         # On the real image
         if train:
@@ -86,27 +88,27 @@ class Trainer:
         disc_real = self.discriminator(img_tensor)
         labels.fill_(1)
         loss_real = adv_loss(disc_real, labels)
-    
+
         if train:
             loss_real.backward()
-        
+
         # on the generated image
         disc_fake = self.discriminator(gen_img.detach())
         labels.fill_(0)
         loss_fake = adv_loss(disc_fake, labels)
 
-        if train: 
+        if train:
             loss_fake.backward()
-        
+
         disc_loss = loss_fake + loss_real
-    
+
         if train:
             self.disc_optimizer.step()
-        
+
         keys = ['gen', 'MSE', 'gdisc', 'KL', 'discr', 'discf', 'disc']
         mean_loss_i = [gen_loss.item(), gen_loss_MSE.item(), gen_loss_disc.item(),
                        gen_loss_KL.item(), loss_real.item(), loss_fake.item(), disc_loss.item()]
-        
+
         loss = {key: val for key, val in zip(keys, mean_loss_i)}
 
         return loss
@@ -149,22 +151,23 @@ class Trainer:
         '''
 
         if (lr_decay is not None) and not reduce_on_plateau:
-            gen_lr = gen_learning_rate*(lr_decay)**( (self.start - 1)/(decay_freq) )
-            dsc_lr = dsc_learning_rate*(lr_decay)**( (self.start - 1)/(decay_freq) )
+            gen_lr = gen_learning_rate * (lr_decay)**((self.start - 1) / (decay_freq))
+            dsc_lr = dsc_learning_rate * (lr_decay)**((self.start - 1) / (decay_freq))
         else:
             gen_lr = gen_learning_rate
             dsc_lr = dsc_learning_rate
 
-        self.neptune_config['model/parameters/gen_learning_rate'] = gen_lr
-        self.neptune_config['model/parameters/dsc_learning_rate'] = dsc_lr
-        self.neptune_config['model/parameters/start'] = self.start
-        self.neptune_config['model/parameters/n_epochs'] = epochs
+        if self.neptune_config is not None:
+            self.neptune_config['model/parameters/gen_learning_rate'] = gen_lr
+            self.neptune_config['model/parameters/dsc_learning_rate'] = dsc_lr
+            self.neptune_config['model/parameters/start'] = self.start
+            self.neptune_config['model/parameters/n_epochs'] = epochs
 
         # create the Adam optimzers
-        self.gen_optimizer = optim.Adam(
-            self.generator.parameters(), lr=gen_lr)
-        self.disc_optimizer = optim.Adagrad(
-            self.discriminator.parameters(), lr=dsc_lr)
+        self.gen_optimizer = optim.NAdam(
+            self.generator.parameters(), lr=gen_lr, betas=(0.9, 0.99))
+        self.disc_optimizer = optim.NAdam(
+            self.discriminator.parameters(), lr=dsc_lr, betas=(0.9, 0.99))
 
         # set up the learning rate scheduler with exponential lr decay
         if reduce_on_plateau:
@@ -174,13 +177,13 @@ class Trainer:
         elif lr_decay is not None:
             gen_scheduler = ExponentialLR(self.gen_optimizer, gamma=lr_decay)
             dsc_scheduler = ExponentialLR(self.disc_optimizer, gamma=lr_decay)
-            self.neptune_config['model/parameters/scheduler'] = 'ExponentialLR'
-            self.neptune_config['model/parameters/decay_freq'] = decay_freq
-            self.neptune_config['model/parameters/lr_decay'] = lr_decay
+            if self.neptune_config is not None:
+                self.neptune_config['model/parameters/scheduler'] = 'ExponentialLR'
+                self.neptune_config['model/parameters/decay_freq'] = decay_freq
+                self.neptune_config['model/parameters/lr_decay'] = lr_decay
         else:
             gen_scheduler = None
             dsc_scheduler = None
-
 
         # empty lists for storing epoch loss data
         D_loss_ep, G_loss_ep = [], []
@@ -251,7 +254,7 @@ class Trainer:
                 loss_str = " ".join([f"{key}: {value:.2e}" for key, value in loss_mean.items()])
 
                 pbar.set_postfix_str(loss_str)
-            
+
             if self.neptune_config is not None:
                 self.neptune_config['eval/gen_loss'].append(loss_mean['gen'])
                 self.neptune_config['eval/disc_loss'].append(loss_mean['disc'])
@@ -293,7 +296,6 @@ class Trainer:
             '/')[-1].replace('discriminator_ep_', '')[:-4]) for
             ch in disc_checkpoints])
 
-
         try:
             assert len(gen_epochs) > 0, "No checkpoints found!"
 
@@ -317,6 +319,8 @@ class Trainer:
 
 # custom weights initialization called on generator and discriminator
 # scaling here means std
+
+
 def weights_init(net, init_type='normal', scaling=0.02):
     """Initialize network weights.
     Parameters:
@@ -347,62 +351,49 @@ class TrainerUNet(Trainer):
         # convert the input image and mask to tensors
         img_tensor = torch.as_tensor(input_img, dtype=torch.float).to(device)
         target_tensor = torch.as_tensor(target_img, dtype=torch.float).to(device)
-        
+
         gen_img = self.generator(img_tensor)
 
-
-        disc_inp_fake = torch.cat((img_tensor, gen_img), 1)
-        disc_inp_real = torch.cat((img_tensor, target_tensor), 1)
-
+        disc_inp_fake = torch.cat((img_tensor, gen_img), 2)
         disc_fake = self.discriminator(disc_inp_fake)
-        
-        labels = torch.full((img_tensor.shape[0], *disc_fake.shape[1:]), 1, dtype=torch.float, device=device)
-        
-        torch.autograd.set_detect_anomaly(True)
-        
+        real_labels = torch.ones_like(disc_fake)
+
+        gen_loss_tversky = fc_tversky(target_tensor, gen_img) * 200
+        gen_loss_disc = adv_loss(disc_fake, real_labels)
+        gen_loss = gen_loss_tversky + gen_loss_disc
+
         # Train the generator
         if train:
             self.generator.zero_grad()
-        
-        gen_loss_tversky = fc_tversky(target_tensor, gen_img)
-        
-        gen_loss_disc = adv_loss(disc_fake, labels)
-        
-        gen_loss = gen_loss_tversky + gen_loss_disc
-
-        if train:
             gen_loss.backward()
             self.gen_optimizer.step()
-        
+
         # Train the discriminator
         # On the real image
         if train:
             self.discriminator.zero_grad()
 
+        disc_inp_real = torch.cat((img_tensor, target_tensor), 2)
         disc_real = self.discriminator(disc_inp_real)
-        labels.fill_(1)
-        loss_real = adv_loss(disc_real, labels)
-    
-        if train:
-            loss_real.backward()
         
-        # on the generated image
-        disc_fake = self.discriminator(disc_inp_fake.detach())
-        labels.fill_(0)
-        loss_fake = adv_loss(disc_fake, labels)
+        disc_inp_fake = torch.cat((img_tensor, gen_img.detach()), 2)
+        disc_fake = self.discriminator(disc_inp_fake)
+        
+        real_labels = torch.ones_like(disc_fake)
+        fake_labels = torch.zeros_like(disc_fake)
+        loss_real = adv_loss(disc_real, real_labels)
+        loss_fake = adv_loss(disc_fake, fake_labels)
+        
+        disc_loss = (loss_fake + loss_real) / 2.
 
-        if train: 
-            loss_fake.backward()
-        
-        disc_loss = loss_fake + loss_real
-    
         if train:
+            disc_loss.backward()
             self.disc_optimizer.step()
-        
+
         keys = ['gen', 'tversky', 'gdisc', 'discr', 'discf', 'disc']
         mean_loss_i = [gen_loss.item(), gen_loss_tversky.item(), gen_loss_disc.item(),
                        loss_real.item(), loss_fake.item(), disc_loss.item()]
-        
+
         loss = {key: val for key, val in zip(keys, mean_loss_i)}
 
         return loss
