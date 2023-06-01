@@ -19,25 +19,28 @@ class PatchDiscriminator(nn.Module):
         next_filt = nfilt
 
         layers = []
-        for i in range(nlayers + 1):
+        for i in range(nlayers):
             # for each layer, we apply conv, act and normalization
-            layers.append(nn.Conv3d(prev_filt, next_filt, (1, 3, 3),
-                                    stride=(1, 1, 1),
-                                    padding=(0, 1, 1)))
+            layers.append(nn.Conv3d(prev_filt, next_filt, (1, 4, 4),
+                                    stride=(1, 2, 2), padding=0))
+            layers.append(nn.InstanceNorm3d(next_filt))
             layers.append(nn.Tanh())
-            layers.append(nn.BatchNorm3d(next_filt))
-            layers.append(nn.MaxPool3d((1, 2, 2)))
-            if dropout > 0:
-                layers.append(nn.Dropout(dropout))
 
             # the number of filters exponentially increase
             prev_filt = next_filt
-            next_filt = next_filt * min([2**i, 8])
+            next_filt = nfilt * min([2**i, 8])
+
+        layers += [
+            nn.Dropout(dropout),
+            nn.Conv3d(prev_filt, next_filt, padding=0,
+                      kernel_size=(1, 4, 4), stride=1),
+            nn.InstanceNorm3d(next_filt),
+            nn.Tanh()
+        ]
 
         # last predictive layer
-        layers.append(nn.Conv3d(prev_filt, 1, (1, 3, 3),
-                                padding=(0, 1, 1)))
-        layers.append(nn.Sigmoid())
+        layers += [nn.Conv3d(next_filt, 1, (1, 4, 4),
+                             padding=0), nn.Sigmoid()]
 
         self.discriminator = nn.Sequential(*layers)
 
@@ -70,27 +73,27 @@ class LSTMDiscriminator(nn.Module):
         layers = []
         for i in range(nlayers):
             # for each layer, we apply conv, act and normalization
-            #layers.append(nn.ConvLSTM(prev_filt, next_filt, (1, 3, 3),
+            # layers.append(nn.ConvLSTM(prev_filt, next_filt, (1, 3, 3),
             #                        stride=(1, 1, 1),
             #                        padding=(0, 1, 1)))
-            #layers.append(nn.Tanh())
-            #layers.append(nn.BatchNorm3d(next_filt))
-            #layers.append(nn.MaxPool3d((1, 2, 2)))
+            # layers.append(nn.Tanh())
+            # layers.append(nn.BatchNorm3d(next_filt))
+            # layers.append(nn.MaxPool3d((1, 2, 2)))
             layers.append(ConvLSTM(prev_filt, hidden[i],
-                                           hidden[i + 1], (3, 3), (2, 2)))
+                                   hidden[i + 1], (3, 3), (2, 2)))
 
             # update the filter value for the next iteration
-            #if dropout > 0:
+            # if dropout > 0:
             #    layers.append(nn.Dropout(dropout))
 
             prev_filt = hidden[i]
 
             # the number of filters exponentially increase
-            inp_size = [int(x/2) for x in inp_size]
+            inp_size = [int(x / 2) for x in inp_size]
 
         pred_layers = []
         # last predictive layer
-        pred_layers.append(nn.Linear(prev_filt*inp_size[0]*inp_size[1], 128))
+        pred_layers.append(nn.Linear(prev_filt * inp_size[0] * inp_size[1], 128))
         pred_layers.append(nn.LeakyReLU(0.2))
 
         pred_layers.append(nn.Linear(128, 1))
@@ -145,7 +148,7 @@ class ConvDiscriminator(nn.Module):
             layers.append(nn.Tanh())
             layers.append(nn.BatchNorm3d(next_filt))
             layers.append(nn.MaxPool3d((1, 2, 2)))
-            #layers.append(ConvLSTM(prev_filt, hidden[i],
+            # layers.append(ConvLSTM(prev_filt, hidden[i],
             #                               hidden[i + 1], (3, 3), (2, 2)))
 
             # update the filter value for the next iteration
@@ -156,11 +159,11 @@ class ConvDiscriminator(nn.Module):
             next_filt = next_filt * min([2**i, 8])
 
             # the number of filters exponentially increase
-            inp_size = [int(x/2) for x in inp_size]
+            inp_size = [int(x / 2) for x in inp_size]
 
         pred_layers = []
         # last predictive layer
-        pred_layers.append(nn.Linear(prev_filt*inp_size[0]*inp_size[1], bottleneck_dim))
+        pred_layers.append(nn.Linear(prev_filt * inp_size[0] * inp_size[1], bottleneck_dim))
         pred_layers.append(nn.Tanh())
 
         pred_layers.append(nn.Linear(bottleneck_dim, 1))
@@ -172,7 +175,6 @@ class ConvDiscriminator(nn.Module):
     def forward(self, x):
         # switch channel and time axis before doing the 3d conv
         x = torch.swapaxes(self.disc_downsample(torch.swapaxes(x, 1, 2)), 1, 2)
-
 
         x = x.reshape((x.shape[0], x.shape[1], -1))
 
