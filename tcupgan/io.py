@@ -37,7 +37,7 @@ class DataGenerator:
         if len(img0.shape) == 3:
             self.d, self.h, self.w = img0.shape
         else:
-            self.nch, self.d, self.h, self.w = img0.shape
+            self.d, self.nch, self.h, self.w = img0.shape
 
         print(f"Found {self.ndata} images of shape {self.w}x{self.h}x{self.d} with {self.nch} channels")
 
@@ -55,7 +55,7 @@ class DataGenerator:
                                      (index + 1) * self.batch_size]
         data = self.get_from_indices(batch_indices)
         return data
-    
+
     def get_from_indices(self, batch_indices):
         imgfiles = self.imgfiles[batch_indices]
 
@@ -65,7 +65,7 @@ class DataGenerator:
         for i in range(len(imgfiles)):
             data = np.load(imgfiles[i])
 
-            imgs[i, :] = data['img']/self.norm
+            imgs[i, :] = data['img'] / self.norm
             segs[i, :] = data['mask']
 
         return imgs, segs
@@ -82,7 +82,7 @@ class NpyDataGenerator(DataGenerator):
         for i, imgi in enumerate(imgfiles):
             imgi = np.load(imgi)
             if self.perc_normalize:
-                imgi = imgi/np.percentile(imgi.flatten(), 98)
+                imgi = imgi / np.percentile(imgi.flatten(), 98)
 
             imgs[i, :] = np.transpose(imgi, (1, 0, 2, 3))
 
@@ -104,7 +104,7 @@ def create_generators(img_datafolder, batch_size, inchannels=3,
     inds = np.arange(ndata)
     np.random.shuffle(inds)
 
-    val_split_ind = int(ndata*val_split)
+    val_split_ind = int(ndata * val_split)
     val_ind = inds[:val_split_ind]
     training_ind = inds[val_split_ind:]
 
