@@ -20,15 +20,16 @@ def time_distribute(x, layer):
     '''
         Applies layer over the temporal axis (default dim 1)
     '''
-    
+
     nt = x.shape[1]
 
     outputs = []
     for t in range(nt):
-        outi = layer(x[:,t,:])
+        outi = layer(x[:, t, :])
         outputs.append(outi)
 
     return torch.stack(outputs, axis=1)
+
 
 '''
 From https://github.com/ndrplz/ConvLSTM_pytorch
@@ -91,6 +92,8 @@ class ConvLSTMCell(nn.Module):
         else:
             h, c = hidden_state
 
+            if (h is None) and (c is None):
+                h, c = self.init_hidden(nbatch, (height, width))
             if h is None:
                 h, _ = self.init_hidden(nbatch, (height, width))
 
@@ -161,15 +164,13 @@ class ConvLSTM(nn.Module):
                                       kernel_size=self.kernel_size)
 
         # 2d max pooling on the hidden layers
-        downsample2d = [nn.Conv2d(self.hidden_dim, next_dim, kernel_size=1),
-                        nn.LeakyReLU(0.2), nn.BatchNorm2d(next_dim),
+        downsample2d = [nn.Conv2d(self.hidden_dim, next_dim, kernel_size=1, bias=False),
                         nn.MaxPool2d(pool_size)]
-        #downsample2d = [nn.BatchNorm2d(self.hidden_dim),
+        # downsample2d = [nn.BatchNorm2d(self.hidden_dim),
         #                nn.MaxPool2d(pool_size)]
 
         # 3d max pool for preserving time domain
-        self.downsample3d = nn.Sequential(nn.BatchNorm3d(self.hidden_dim),
-                                          nn.MaxPool3d((1, *pool_size)))
+        self.downsample3d = nn.MaxPool3d((1, *pool_size))
 
         self.downsample2d = nn.Sequential(*downsample2d)
 
@@ -186,15 +187,15 @@ class ConvLSTM(nn.Module):
         output_feature, c = self.lstmlayer(x, hidden_state)
 
         # apply max pooling on the LSTM result
-        #h = self.downsample2d(output_feature[:, -1, :, :])
+        # h = self.downsample2d(output_feature[:, -1, :, :])
         c = self.downsample2d(c)
         output_feature = apply_on_channel(output_feature, self.downsample3d)
 
-        return output_feature, c#, h, c
+        return output_feature, c  # , h, c
 
 
 class ConvTransposeLSTM(nn.Module):
-    def __init__(self, input_dim, hidden_dim, next_dim,
+    def __init__(self, input_dim, hidden_dim,
                  kernel_size, pool_size):
         super(ConvTransposeLSTM, self).__init__()
 
@@ -208,22 +209,22 @@ class ConvTransposeLSTM(nn.Module):
 
         # for upsampling the hidden vectors
         convt2d = nn.ConvTranspose2d(self.hidden_dim,
-                                     next_dim,
+                                     self.hidden_dim,
                                      pool_size, stride=pool_size)
-        act2d = nn.LeakyReLU(0.2)
-        bn2d = nn.BatchNorm2d(next_dim)
-
+        bn2d = nn.InstanceNorm2d(self.hidden_dim)
+        act2d = nn.LeakyReLU(0.2, True)
+        
         # upsampling the feature vector
         convt3d = nn.ConvTranspose3d(self.hidden_dim,
-                                     next_dim,
+                                     self.hidden_dim,
                                      (1, *pool_size),
                                      stride=(1, *pool_size))
 
-        act3d = nn.LeakyReLU(0.2)
-        bn3d = nn.BatchNorm3d(next_dim)
-        self.upsample3d = nn.Sequential(convt3d, act3d, bn3d)
+        act3d = nn.LeakyReLU(0.2, True)
+        bn3d = nn.InstanceNorm3d(self.hidden_dim)
+        self.upsample3d = nn.Sequential(convt3d, bn3d, act3d)
 
-        self.upsample2d = nn.Sequential(convt2d, act2d, bn2d)
+        self.upsample2d = nn.Sequential(convt2d, bn2d, act2d)
 
     def forward(self, x, h=None, c=None):
         '''
@@ -245,8 +246,9 @@ class ConvTransposeLSTM(nn.Module):
 
         return output_feature, c
 
+
 class UpSampleLSTM(nn.Module):
-    def __init__(self, input_dim, hidden_dim, next_dim,
+    def __init__(self, input_dim, hidden_dim,
                  kernel_size, pool_size):
         super(UpSampleLSTM, self).__init__()
 
@@ -257,28 +259,11 @@ class UpSampleLSTM(nn.Module):
         self.lstmlayer = ConvLSTMCell(input_dim=self.input_dim,
                                       hidden_dim=self.hidden_dim,
                                       kernel_size=self.kernel_size)
-
-        padding = kernel_size[0] // 2
-
         # for upsampling the hidden vectors
-        us2d = nn.Upsample(scale_factor=pool_size)
-        conv2d = nn.Conv2d(self.hidden_dim,
-                            next_dim, kernel_size, stride=1, padding=padding)
-        act2d = nn.LeakyReLU(0.2)
-        #bn2d = nn.BatchNorm2d(next_dim)
-        self.upsample2d = nn.Sequential(us2d, conv2d, act2d)
+        self.upsample2d = nn.Upsample(scale_factor=pool_size)
 
         # upsampling the feature vector
-        us3d = nn.Upsample(scale_factor=(1, *pool_size))
-        conv3d = nn.Conv3d(self.hidden_dim,
-                             next_dim,
-                             (1, *kernel_size),
-                             stride=1, padding=(0, padding, padding))
-
-        act3d = nn.LeakyReLU(0.2)
-        #bn3d = nn.BatchNorm3d(next_dim)
-        self.upsample3d = nn.Sequential(us3d, conv3d, act3d)
-
+        self.upsample3d = nn.Upsample(scale_factor=(1, *pool_size))
 
     def forward(self, x, h=None, c=None):
         '''
