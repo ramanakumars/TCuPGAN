@@ -1,7 +1,6 @@
 import torch.nn as nn
 import torch
-from .lstm_layers import (ConvLSTM, ConvTransposeLSTM, UpSampleLSTM)
-from einops import rearrange
+from .lstm_layers import (ConvLSTM, ConvTransposeLSTM)
 from einops.layers.torch import Rearrange
 
 
@@ -51,12 +50,12 @@ class LSTMUNet(nn.Module):
 
             if i == 0:
                 decoder_layers.append(ConvTransposeLSTM(prev_filt,
-                                                   decoder_hidden_dims[i],
-                                                   (3, 3), (2, 2)))
+                                                        decoder_hidden_dims[i],
+                                                        (3, 3), (2, 2)))
             else:
                 decoder_layers.append(ConvTransposeLSTM(prev_filt * 2,
-                                                   decoder_hidden_dims[i],
-                                                   (3, 3), (2, 2)))
+                                                        decoder_hidden_dims[i],
+                                                        (3, 3), (2, 2)))
 
             prev_filt = decoder_hidden_dims[i]
 
