@@ -7,10 +7,11 @@ from einops.layers.torch import Rearrange
 class LSTMUNet(nn.Module):
     gen_type = 'UNet'
 
-    def __init__(self, hidden_dims=[8, 16, 32], bottleneck_dims=[16, 8],
-                 input_channels=1, output_channels=4):
-
+    def __init__(self, hidden_dims=[8, 16, 32], input_channels=1, output_channels=4):
         super(LSTMUNet, self).__init__()
+
+        self.input_channels = input_channels
+        self.output_channels = output_channels
 
         self.hidden_dims = hidden_dims
         prev_filt = input_channels
@@ -61,37 +62,17 @@ class LSTMUNet(nn.Module):
 
         final_conv = nn.Conv3d(prev_filt, output_channels, (1, 3, 3), padding=(0, 1, 1), stride=(1, 1, 1))
         if output_channels > 1:
-            self.pred_final = nn.Sequential(Rearrange('b t c h w -> b c t h w'), final_conv, Rearrange('b c t h w -> b t c h w'), nn.Softmax(dim=2))
+            self.pred_final = nn.Sequential(Rearrange('b t c h w -> b c t h w'),
+                                            final_conv,
+                                            Rearrange('b c t h w -> b t c h w'),
+                                            nn.Softmax(dim=2))
         else:
-            self.pred_final = nn.Sequential(Rearrange('b t c h w -> b c t h w'), final_conv, Rearrange('b c t h w -> b t c h w'), nn.Sigmoid())
+            self.pred_final = nn.Sequential(Rearrange('b t c h w -> b c t h w'),
+                                            final_conv,
+                                            Rearrange('b c t h w -> b t c h w'),
+                                            nn.Sigmoid())
 
         self.decoder_layers = nn.ModuleList(decoder_layers)
-
-    def encode(self, x):
-        '''
-            Create the vector embedding
-        '''
-        c = None
-        for i, layer in enumerate(self.encoder_layers):
-            if i == 0:
-                hidden = None
-            else:
-                hidden = [None, c]
-
-            x, h, c = layer(x, hidden)
-
-        return x, c
-
-    def decode(self, x, c):
-        '''
-            Decode from the vector embedding. Note that
-            this needs both the cell state and the
-            bottlenecked feature
-        '''
-        for i, layer in enumerate(self.decoder_layers):
-            x, c = layer(x, c)
-
-        return x
 
     def forward(self, x):
         '''
