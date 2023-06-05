@@ -10,7 +10,7 @@ class PatchDiscriminator(nn.Module):
         is real or fake.
     '''
 
-    def __init__(self, input_channels, nlayers=3, nfilt=16, dropout=0.25):
+    def __init__(self, input_channels, nlayers=3, nfilt=16, dropout=0.25, activation='leakyrelu'):
         super(PatchDiscriminator, self).__init__()
 
         # the first convolution goes from the input channels
@@ -18,13 +18,20 @@ class PatchDiscriminator(nn.Module):
         prev_filt = input_channels
         next_filt = nfilt
 
+        kernel_size = 3
+
+        if activation == 'leakyrelu':
+            activation = nn.LeakyReLU(0.2, True)
+        elif activation == 'tanh':
+            activation = nn.Tanh()
+
         layers = []
         for i in range(nlayers):
             # for each layer, we apply conv, act and normalization
-            layers.append(nn.Conv3d(prev_filt, next_filt, (1, 4, 4),
+            layers.append(nn.Conv3d(prev_filt, next_filt, (1, kernel_size, kernel_size),
                                     stride=(1, 2, 2), padding=0))
             layers.append(nn.InstanceNorm3d(next_filt))
-            layers.append(nn.Tanh())
+            layers.append(activation)
 
             # the number of filters exponentially increase
             prev_filt = next_filt
@@ -33,13 +40,13 @@ class PatchDiscriminator(nn.Module):
         layers += [
             nn.Dropout(dropout),
             nn.Conv3d(prev_filt, next_filt, padding=0,
-                      kernel_size=(1, 4, 4), stride=1),
+                      kernel_size=(1, kernel_size, kernel_size), stride=1),
             nn.InstanceNorm3d(next_filt),
-            nn.Tanh()
+            activation
         ]
 
         # last predictive layer
-        layers += [nn.Conv3d(next_filt, 1, (1, 4, 4),
+        layers += [nn.Conv3d(next_filt, 1, (1, kernel_size, kernel_size),
                              padding=0), nn.Sigmoid()]
 
         self.discriminator = nn.Sequential(*layers)
