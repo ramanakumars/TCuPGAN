@@ -358,7 +358,7 @@ class TrainerUNet(Trainer):
         disc_fake = self.discriminator(disc_inp_fake)
         real_labels = torch.ones_like(disc_fake)
 
-        gen_loss_tversky = fc_tversky(target_tensor, gen_img) * 200
+        gen_loss_tversky = fc_tversky(target_tensor, gen_img) * 20
         gen_loss_disc = adv_loss(disc_fake, real_labels)
         gen_loss = gen_loss_tversky + gen_loss_disc
 
