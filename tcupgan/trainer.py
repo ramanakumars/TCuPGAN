@@ -341,6 +341,9 @@ def weights_init(net, init_type='normal', scaling=0.02):
 
 
 class TrainerUNet(Trainer):
+
+    tversky_beta = 20
+
     def batch(self, x, y, train=False):
         '''
             Train the generator and discriminator on a single batch
@@ -358,7 +361,7 @@ class TrainerUNet(Trainer):
         disc_fake = self.discriminator(disc_inp_fake)
         real_labels = torch.ones_like(disc_fake)
 
-        gen_loss_tversky = fc_tversky(target_tensor, gen_img) * 20
+        gen_loss_tversky = fc_tversky(target_tensor, gen_img) * self.tversky_beta
         gen_loss_disc = adv_loss(disc_fake, real_labels)
         gen_loss = gen_loss_tversky + gen_loss_disc
 
