@@ -1,5 +1,13 @@
 import numpy as np
 import glob
+import torch
+from torch.utils.data import Dataset
+from torchvision.io import read_image, ImageReadMode
+from torch.nn.functional import one_hot
+from torchvision import transforms
+from einops import rearrange
+import os
+import tqdm
 
 
 class DataGenerator:
@@ -124,3 +132,68 @@ def create_generators(img_datafolder, batch_size, inchannels=3,
                                     outchannels=outchannels, norm=norm)
 
     return train_data, val_data
+
+
+class VideoDataGenerator(Dataset):
+    size = 256
+
+    def __init__(self, root_folder, max_frames=10, in_channels=1, out_channels=256, verbose=False):
+        self.root_folder = root_folder
+        self.max_frames = max_frames
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+
+        self.frames = []
+        self.data = []
+        for name in tqdm.tqdm(sorted(os.listdir(self.root_folder)), desc='Building dataset', disable=not verbose, ascii=True):
+            folder = os.path.join(self.root_folder, name)
+            if not os.path.isdir(folder):
+                continue
+            frames = sorted(glob.glob(os.path.join(folder, "origin/*.jpg")))
+            maskframes = sorted(glob.glob(os.path.join(folder, "mask/*.png")))
+
+            if len(maskframes) != len(frames):
+                continue
+
+            nframes = len(frames)
+
+            assert max_frames <= nframes,\
+                f"Maximum slice dimension is greater than the number of frames in {folder}"
+
+            nbatches = nframes // max_frames + 1
+
+            self.frames.append(nframes)
+
+            for i in range(nbatches):
+                # store the data as the folder and the start frame
+                self.data.append([folder, min([i * max_frames, nframes - max_frames])])
+
+        self.transform = transforms.Resize((self.size, self.size))
+        self.transform_mask = transforms.Resize((self.size, self.size))
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, index):
+        folder, start = self.data[index]
+
+        img_fnames = sorted(glob.glob(os.path.join(self.root_folder, f"{folder}/origin/*.jpg")))[start:start + self.max_frames]
+
+        imgs = torch.zeros((self.max_frames, self.in_channels, self.size, self.size))
+        masks = torch.zeros((self.max_frames, self.out_channels, self.size, self.size))
+
+        for i, fname in enumerate(img_fnames):
+            imgs[i, :] = self.transform(read_image(fname, ImageReadMode.RGB))
+            mask = read_image(fname.replace("origin", "mask").replace('.jpg', '.png'), ImageReadMode.GRAY)
+            mask[mask == 0] = 255
+            mask[mask == 252] = 255
+            mask = mask - 1
+            mask[mask == 254] = 255
+            mask[mask == 255] = 125
+            mask = one_hot(
+                mask.to(torch.int64),
+                num_classes=self.out_channels
+            )
+            masks[i, :] = self.transform_mask(rearrange(mask[0, :], "h w c -> c h w"))
+
+        return imgs, masks
