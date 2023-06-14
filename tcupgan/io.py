@@ -8,6 +8,12 @@ from torchvision import transforms
 from einops import rearrange
 import os
 import tqdm
+import signal
+
+
+def initializer():
+    """Ignore CTRL+C in the worker process."""
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 
 class DataGenerator:
@@ -135,9 +141,9 @@ def create_generators(img_datafolder, batch_size, inchannels=3,
 
 
 class VideoDataGenerator(Dataset):
-    size = 256
+    size = 192
 
-    def __init__(self, root_folder, max_frames=10, in_channels=1, out_channels=256, verbose=False):
+    def __init__(self, root_folder, max_frames=10, in_channels=3, out_channels=126, verbose=False):
         self.root_folder = root_folder
         self.max_frames = max_frames
         self.in_channels = in_channels
@@ -169,7 +175,6 @@ class VideoDataGenerator(Dataset):
                 self.data.append([folder, min([i * max_frames, nframes - max_frames])])
 
         self.transform = transforms.Resize((self.size, self.size))
-        self.transform_mask = transforms.Resize((self.size, self.size))
 
     def __len__(self):
         return len(self.data)
@@ -183,17 +188,68 @@ class VideoDataGenerator(Dataset):
         masks = torch.zeros((self.max_frames, self.out_channels, self.size, self.size))
 
         for i, fname in enumerate(img_fnames):
-            imgs[i, :] = self.transform(read_image(fname, ImageReadMode.RGB))
-            mask = read_image(fname.replace("origin", "mask").replace('.jpg', '.png'), ImageReadMode.GRAY)
-            mask[mask == 0] = 255
-            mask[mask == 252] = 255
-            mask = mask - 1
-            mask[mask == 254] = 255
-            mask[mask == 255] = 125
-            mask = one_hot(
-                mask.to(torch.int64),
-                num_classes=self.out_channels
-            )
-            masks[i, :] = self.transform_mask(rearrange(mask[0, :], "h w c -> c h w"))
+            img, mask = self.get_image_mask_pair(fname)
+            imgs[i, :] = self.transform(img)
+            masks[i, :] = self.transform(mask)
 
         return imgs, masks
+
+    def get_image_mask_pair(self, fname):
+        img = read_image(fname, ImageReadMode.RGB)
+        mask = read_image(fname.replace("origin", "mask").replace('.jpg', '.png'), ImageReadMode.GRAY)[0, :]
+
+        mask[mask > 124] = 0
+        mask = one_hot(
+            mask.to(torch.int64),
+            num_classes=self.out_channels
+        )
+        mask = rearrange(mask, "h w c -> c h w")
+
+        return img, mask
+
+
+class NpzDataSet(Dataset):
+    file_type = 'npz'
+
+    def __init__(self, datafolder, inchannels=3, outchannels=3, norm=1.):
+        self.img_datafolder = datafolder
+
+        self.imgfiles = np.asarray(
+            sorted(glob.glob(datafolder + f"*.{self.file_type}")))
+
+        self.indices = np.arange(len(self.imgfiles))
+
+        self.ndata = len(self.indices)
+
+        self.inchannels = inchannels
+        self.outchannels = outchannels
+
+        self.norm = norm
+        self.perc_normalize = False
+
+        # get info about the data
+
+        if self.file_type == 'npz':
+            img0 = np.load(self.imgfiles[0])['img']
+        else:
+            img0 = np.load(self.imgfiles[0])
+
+        if len(img0.shape) == 3:
+            self.d, self.h, self.w = img0.shape
+        else:
+            self.d, self.nch, self.h, self.w = img0.shape
+
+        print(f"Found {self.ndata} images of shape {self.w}x{self.h}x{self.d} with {self.nch} channels")
+
+    def __len__(self):
+        return self.ndata
+
+    def __getitem__(self, index):
+        imgfile = self.imgfiles[index]
+
+        data = np.load(imgfile)
+
+        imgs = torch.as_tensor(data['img'], dtype=torch.float) / self.norm
+        segs = torch.as_tensor(data['mask'], dtype=torch.float)
+
+        return imgs, segs
