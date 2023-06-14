@@ -25,9 +25,9 @@ def kl_loss(mu, sig):
 
 def fc_tversky(y_true, y_pred, beta=0.7, gamma=0.75, batch_mean=True):
     smooth = 1
-    tp = torch.sum(y_true * y_pred, axis=(1, 3, 4))
-    fn = torch.sum((1. - y_pred) * y_true, axis=(1, 3, 4))
-    fp = torch.sum(y_pred * (1. - y_true), axis=(1, 3, 4))
+    tp = torch.sum(y_true * y_pred, axis=(3, 4))
+    fn = torch.sum((1. - y_pred) * y_true, axis=(3, 4))
+    fp = torch.sum(y_pred * (1. - y_true), axis=(3, 4))
     tversky = (tp + smooth) /\
         (tp + beta * fn + (1. - beta) * fp + smooth)
 
@@ -65,4 +65,4 @@ def mink(y_pred, y_true):
 # alias
 adv_loss = nn.BCELoss()
 
-gen_loss = mink
+ce_loss = nn.CrossEntropyLoss()  # mink
