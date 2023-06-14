@@ -6,7 +6,9 @@ import glob
 from collections import defaultdict
 from torch import optim
 from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau
-from .losses import mink, kl_loss, adv_loss, fc_tversky
+from .losses import mink, kl_loss, adv_loss, fc_tversky, ce_loss
+from torch.nn.functional import cross_entropy
+from einops import rearrange
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -23,7 +25,7 @@ class Trainer:
 
     neptune_config = None
 
-    def __init__(self, generator, discriminator, savefolder):
+    def __init__(self, generator, discriminator, savefolder, device=device):
         '''
             Store the generator and discriminator info
         '''
@@ -33,6 +35,7 @@ class Trainer:
 
         self.generator = generator
         self.discriminator = discriminator
+        self.device = device
 
         if savefolder[-1] != '/':
             savefolder += '/'
@@ -114,7 +117,8 @@ class Trainer:
         return loss
 
     def train(self, train_data, val_data, epochs, dsc_learning_rate=1.e-4,
-              gen_learning_rate=1.e-3, save_freq=10, lr_decay=None, decay_freq=5, reduce_on_plateau=False):
+              gen_learning_rate=1.e-3, save_freq=10, lr_decay=None, decay_freq=5,
+              reduce_on_plateau=False):
         '''
             Training driver which loads the optimizer and calls the
             `train_batch` method. Also handles checkpoint saving
@@ -201,7 +205,8 @@ class Trainer:
             # batch loss data
             pbar = tqdm.tqdm(train_data, desc='Training: ', dynamic_ncols=True)
 
-            train_data.shuffle()
+            if hasattr(train_data, 'shuffle'):
+                train_data.shuffle()
 
             # set to training mode
             self.generator.train()
@@ -237,7 +242,8 @@ class Trainer:
             self.generator.eval()
             pbar = tqdm.tqdm(val_data, desc='Validation: ')
 
-            val_data.shuffle()
+            if hasattr(val_data, 'shuffle'):
+                val_data.shuffle()
 
             losses = defaultdict(list)
             # loop through the training data
@@ -342,18 +348,20 @@ def weights_init(net, init_type='normal', scaling=0.02):
 
 class TrainerUNet(Trainer):
 
-    tversky_beta = 20
+    tversky_alpha = 200
+    tversky_beta = 0.7
+    tversky_gamma = 0.5
 
     def batch(self, x, y, train=False):
         '''
             Train the generator and discriminator on a single batch
         '''
-
-        input_img, target_img = x, y
-
         # convert the input image and mask to tensors
-        img_tensor = torch.as_tensor(input_img, dtype=torch.float).to(device)
-        target_tensor = torch.as_tensor(target_img, dtype=torch.float).to(device)
+        if not isinstance(x, torch.Tensor):
+            img_tensor = torch.as_tensor(x, dtype=torch.float).to(self.device)
+            target_tensor = torch.as_tensor(y, dtype=torch.float).to(self.device)
+        else:
+            img_tensor, target_tensor = x.to(self.device, non_blocking=True), y.to(self.device, non_blocking=True)
 
         gen_img = self.generator(img_tensor)
 
@@ -361,7 +369,11 @@ class TrainerUNet(Trainer):
         disc_fake = self.discriminator(disc_inp_fake)
         real_labels = torch.ones_like(disc_fake)
 
-        gen_loss_tversky = fc_tversky(target_tensor, gen_img) * self.tversky_beta
+        weight = 1 - torch.sum(target_tensor, axis=(0, 1, 3, 4)) / torch.sum(target_tensor)
+
+        gen_loss_tversky = cross_entropy(rearrange(gen_img, "b d c h w -> b c d h w"),
+                                         rearrange(target_tensor, "b d c h w -> b c d h w"),
+                                         weight=weight) * self.tversky_alpha  # fc_tversky(target_tensor, gen_img, beta=self.tversky_beta, gamma=self.tversky_gamma) * self.tversky_alpha
         gen_loss_disc = adv_loss(disc_fake, real_labels)
         gen_loss = gen_loss_tversky + gen_loss_disc
 
