@@ -7,7 +7,7 @@ from einops.layers.torch import Rearrange
 class LSTMUNet(nn.Module):
     gen_type = 'UNet'
 
-    def __init__(self, hidden_dims=[8, 16, 32], input_channels=1, output_channels=4):
+    def __init__(self, hidden_dims=[8, 16, 32], decoder_hidden_dims=None, input_channels=1, output_channels=4):
         super(LSTMUNet, self).__init__()
 
         self.input_channels = input_channels
@@ -15,6 +15,12 @@ class LSTMUNet(nn.Module):
 
         self.hidden_dims = hidden_dims
         prev_filt = input_channels
+
+        # invert the hidden layer filters for the decoder
+        # also add the input channel at the end
+        reverse_encoder_dims = [*hidden_dims[::-1][1:], output_channels]
+        if decoder_hidden_dims is None:
+            decoder_hidden_dims = reverse_encoder_dims
 
         # create the encoder
         encoder_layers = []
@@ -24,10 +30,10 @@ class LSTMUNet(nn.Module):
             # LSTM step, so we convolve to hidden_dims[i+1] filters and
             # max pool to downsample
             if i == 0:
-                encoder_layers.append(ConvLSTM(prev_filt, hidden_dims[i], input_channels,
+                encoder_layers.append(ConvLSTM(prev_filt, hidden_dims[i], output_channels,
                                                (3, 3), (2, 2)))
             else:
-                encoder_layers.append(ConvLSTM(prev_filt, hidden_dims[i], hidden_dims[i - 1],
+                encoder_layers.append(ConvLSTM(prev_filt, hidden_dims[i], decoder_hidden_dims[::-1][i],
                                                (3, 3), (2, 2)))
 
             # update the filter value for the next iteration
@@ -37,12 +43,9 @@ class LSTMUNet(nn.Module):
 
         decoder_layers = []
 
-        # invert the hidden layer filters for the decoder
-        # also add the input channel at the end
-        decoder_hidden_dims = [*hidden_dims[::-1][1:], output_channels]
-
         # the starting size is the last filter size of the encoder
-        prev_filt = hidden_dims[-1]
+        prev_decoder_filt = hidden_dims[-1]
+        prev_encoder_filt = hidden_dims[-1]
         for i in range(len(decoder_hidden_dims)):
             # each decoder has the ith filter number of channels,
             # but (i+1)th filter in its cell state vector
@@ -50,22 +53,22 @@ class LSTMUNet(nn.Module):
             # the cat of both the skipped vector and the upsampling vector
 
             if i == 0:
-                decoder_layers.append(ConvTransposeLSTM(prev_filt,
+                decoder_layers.append(ConvTransposeLSTM(prev_encoder_filt,
                                                         decoder_hidden_dims[i],
                                                         (3, 3), (2, 2)))
             else:
-                decoder_layers.append(ConvTransposeLSTM(prev_filt * 2,
+                decoder_layers.append(ConvTransposeLSTM(prev_decoder_filt + prev_encoder_filt,
                                                         decoder_hidden_dims[i],
                                                         (3, 3), (2, 2)))
 
-            prev_filt = decoder_hidden_dims[i]
+            prev_decoder_filt = decoder_hidden_dims[i]
+            prev_encoder_filt = reverse_encoder_dims[i]
 
-        final_conv = nn.Conv3d(prev_filt, output_channels, (1, 3, 3), padding=(0, 1, 1), stride=(1, 1, 1))
+        final_conv = nn.Conv3d(prev_decoder_filt, output_channels, (1, 3, 3), padding=(0, 1, 1), stride=(1, 1, 1))
         if output_channels > 1:
             self.pred_final = nn.Sequential(Rearrange('b t c h w -> b c t h w'),
                                             final_conv,
-                                            Rearrange('b c t h w -> b t c h w'),
-                                            nn.Softmax(dim=2))
+                                            Rearrange('b c t h w -> b t c h w'))
         else:
             self.pred_final = nn.Sequential(Rearrange('b t c h w -> b c t h w'),
                                             final_conv,
