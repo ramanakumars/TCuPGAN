@@ -1,9 +1,10 @@
 import torch.nn as nn
 import torch
-from .lstm_layers import time_distribute
+
 
 class TemporalUNet(nn.Module):
     gen_type = 'UNet'
+
     def __init__(self, hidden_dims=[8, 16, 32], bottleneck_dims=[16, 8],
                  input_channels=1, output_channels=4):
 
@@ -15,10 +16,10 @@ class TemporalUNet(nn.Module):
         # create the encoder
         encoder_layers = []
         for i in range(len(hidden_dims) - 1):
-            downsample2d = [nn.Conv3d(prev_filt, hidden_dims[i], 
+            downsample2d = [nn.Conv3d(prev_filt, hidden_dims[i],
                                       kernel_size=(1, 3, 3), padding=(0, 1, 1)),
                             nn.ReLU(True), nn.BatchNorm3d(hidden_dims[i]),
-                            nn.MaxPool3d((1, 2,2))]
+                            nn.MaxPool3d((1, 2, 2))]
 
             encoder_layers.append(nn.Sequential(*downsample2d))
 
@@ -34,7 +35,7 @@ class TemporalUNet(nn.Module):
             bottleneck_layers_enc.extend([
                 nn.Conv3d(prev_filt, filt, (1, 1, 1), padding=0,
                           stride=1),
-                nn.ReLU(True), #nn.LeakyReLU(0.2),
+                nn.ReLU(True),  # nn.LeakyReLU(0.2),
                 nn.BatchNorm3d(filt)])
             prev_filt = filt
 
@@ -44,7 +45,7 @@ class TemporalUNet(nn.Module):
             bottleneck_layers_dec.extend([
                 nn.Conv3d(prev_filt, filt, (1, 1, 1), padding=0,
                           stride=1),
-                nn.ReLU(True), #nn.LeakyReLU(0.2),
+                nn.ReLU(True),  # nn.LeakyReLU(0.2),
                 nn.BatchNorm3d(filt)])
             prev_filt = filt
 
@@ -63,13 +64,13 @@ class TemporalUNet(nn.Module):
             # for upsampling the hidden vectors
             us3d = nn.Upsample(scale_factor=(1, 2, 2))
             conv3d = nn.Conv3d(hidden_dim * 2,
-                                decoder_hidden_dims[i+1], (1, 3, 3),
-                                stride=1, padding=(0, 1, 1))
+                               decoder_hidden_dims[i + 1], (1, 3, 3),
+                               stride=1, padding=(0, 1, 1))
             act3d = nn.ReLU(True)
-            bn3d = nn.BatchNorm3d(decoder_hidden_dims[i+1])
+            bn3d = nn.BatchNorm3d(decoder_hidden_dims[i + 1])
 
             decoder_layers.append(nn.Sequential(us3d, conv3d, act3d, bn3d))
-            
+
             hidden_dim = decoder_hidden_dims[i + 1]
 
         if output_channels > 1:
@@ -85,7 +86,7 @@ class TemporalUNet(nn.Module):
         '''
         for i, layer in enumerate(self.encoder_layers):
             x = layer(x)
-    
+
         return x
 
     def decode(self, x, c):
@@ -107,13 +108,7 @@ class TemporalUNet(nn.Module):
         x = torch.swapaxes(x, 1, 2)
 
         xencs = []
-        c = None
         for i, layer in enumerate(self.encoder_layers):
-            if i == 0:
-                hidden = None
-            else:
-                hidden = [None, c]
-
             x = layer(x)
             xencs.append(x)
 
@@ -123,18 +118,16 @@ class TemporalUNet(nn.Module):
         # decode the encoded c vector for reconstruction
         dec_x = self.bottleneck_dec(enc_x)
 
-
         nlayers = len(self.decoder_layers)
         for i, layer in enumerate(self.decoder_layers):
             # skip the x vector across the bottleneck
-            xconc = torch.cat([dec_x, xencs[nlayers - i -1]], dim=1)
+            xconc = torch.cat([dec_x, xencs[nlayers - i - 1]], dim=1)
 
             dec_x = layer(xconc)
 
         # smooth the final output mask to remove the gridding
         x = self.pred_final(dec_x)
-        
+
         x = torch.swapaxes(x, 1, 2)
 
         return x
-

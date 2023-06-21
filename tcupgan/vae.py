@@ -4,9 +4,9 @@ from .lstm_layers import ConvLSTM, ConvTransposeLSTM, UpSampleLSTM
 
 
 def sample(mu, log_var):
-    std = torch.exp(0.5*log_var)
+    std = torch.exp(0.5 * log_var)
     eps = torch.randn_like(std)
-    return mu + eps*std
+    return mu + eps * std
 
 
 class LSTMVAE_old(nn.Module):
@@ -79,7 +79,7 @@ class LSTMVAE_old(nn.Module):
                                                     decoder_hidden_dims[i + 1],
                                                     (3, 3), (2, 2)))
             hidden_dim = decoder_hidden_dims[i + 1]
-        
+
         if final_act == 'elu':
             self.pred_final = nn.ELU()
         else:
@@ -139,10 +139,12 @@ class LSTMVAE_old(nn.Module):
         img = self.pred_final(img)
         '''
 
-        return enc_x#img, c_mu, c_sig
+        return enc_x  # img, c_mu, c_sig
+
 
 class LSTMVAE(nn.Module):
     gen_type = 'VAE'
+
     def __init__(self, hidden_dims=[8, 16, 32], bottleneck_dims=[16, 8],
                  input_channels=1, output_channels=4, input_size=(96, 96),
                  batchnorm=False, final_act='elu'):
@@ -155,10 +157,10 @@ class LSTMVAE(nn.Module):
         conv_layers = []
         conv_layers.append(nn.Conv3d(input_channels, 16, (1, 3, 3), (1, 1, 1), padding=(0, 1, 1)))
         conv_layers.append(nn.LeakyReLU(0.2))
-        
+
         conv_layers.append(nn.Conv3d(16, 32, (1, 3, 3), (1, 1, 1), padding=(0, 1, 1)))
         conv_layers.append(nn.LeakyReLU(0.2))
-        
+
         self.enc_conv_layers = nn.Sequential(*conv_layers)
 
         prev_filt = 32
@@ -171,7 +173,7 @@ class LSTMVAE(nn.Module):
             # max pool to downsample
             encoder_layers.append(ConvLSTM(prev_filt, hidden_dims[i],
                                            hidden_dims[i + 1], (5, 5), (2, 2)))
-            input_size = [ int(size / 2) for size in input_size]
+            input_size = [int(size / 2) for size in input_size]
 
             # update the filter value for the next iteration
             prev_filt = hidden_dims[i]
@@ -190,12 +192,12 @@ class LSTMVAE(nn.Module):
             bottleneck_layers_enc_x.extend([
                 nn.Linear(prev_filt, filt),
                 nn.LeakyReLU(0.2),
-            ]) #nn.LeakyReLU(0.2),
-                #nn.BatchNorm2d(filt)])
+            ])  # nn.LeakyReLU(0.2),
+            # nn.BatchNorm2d(filt)])
             bottleneck_layers_enc_c.extend([
                 nn.Linear(prev_filt, filt),
                 nn.LeakyReLU(0.2),
-            ]) #nn.LeakyReLU(0.2),
+            ])  # nn.LeakyReLU(0.2),
             prev_filt = filt
 
             if batchnorm:
@@ -204,8 +206,8 @@ class LSTMVAE(nn.Module):
 
         self.bottleneck_enc_x = nn.Sequential(*bottleneck_layers_enc_x)
         self.bottleneck_enc_c = nn.Sequential(*bottleneck_layers_enc_c)
-        self.enc_musig_x = nn.Linear(filt, 2*filt)
-        self.enc_musig_c = nn.Linear(filt, 2*filt)
+        self.enc_musig_x = nn.Linear(filt, 2 * filt)
+        self.enc_musig_c = nn.Linear(filt, 2 * filt)
 
         bottleneck_layers_dec_x = []
         bottleneck_layers_dec_c = []
@@ -214,15 +216,14 @@ class LSTMVAE(nn.Module):
             bottleneck_layers_dec_x.extend([
                 nn.Linear(prev_filt, filt),
                 nn.LeakyReLU(0.2),
-            ]) #nn.LeakyReLU(0.2),
-                #nn.BatchNorm1d(filt)])
+            ])  # nn.LeakyReLU(0.2),
+            # nn.BatchNorm1d(filt)])
             bottleneck_layers_dec_c.extend([
                 nn.Linear(prev_filt, filt),
                 nn.LeakyReLU(0.2),
-            ]) #nn.LeakyReLU(0.2),
+            ])  # nn.LeakyReLU(0.2),
             prev_filt = filt
 
-        
         self.bottleneck_dec_x = nn.Sequential(*bottleneck_layers_dec_x)
         self.bottleneck_dec_c = nn.Sequential(*bottleneck_layers_dec_c)
 
@@ -241,10 +242,10 @@ class LSTMVAE(nn.Module):
             # the cat of both the skipped vector and the upsampling vector
 
             decoder_layers.append(UpSampleLSTM(decoder_hidden_dims[i],
-                                                    hidden_dim,
-                                                    decoder_hidden_dims[i + 1],
-                                                    (5, 5), (2, 2)))
-            #decoder_layers.append(UpSampleLSTM(decoder_hidden_dims[i] * 2,
+                                               hidden_dim,
+                                               decoder_hidden_dims[i + 1],
+                                               (5, 5), (2, 2)))
+            # decoder_layers.append(UpSampleLSTM(decoder_hidden_dims[i] * 2,
             #                                        hidden_dim,
             #                                        decoder_hidden_dims[i + 1],
             #                                        (3, 3), (2, 2)))
@@ -253,7 +254,7 @@ class LSTMVAE(nn.Module):
         decoder_conv = []
         decoder_conv.append(nn.ConvTranspose3d(hidden_dim, hidden_dims[0], (1, 4, 4), (1, 2, 2), padding=(0, 1, 1)))
         decoder_conv.append(nn.LeakyReLU(0.2))
-        
+
         decoder_conv.append(nn.ConvTranspose3d(hidden_dims[0], output_channels, (1, 3, 3), (1, 1, 1), padding=(0, 1, 1)))
 
         if final_act == 'elu':
@@ -278,7 +279,7 @@ class LSTMVAE(nn.Module):
                 hidden = [None, c]
 
             x, c = layer(x, hidden)
- 
+
         c = c.reshape((c.shape[0], -1))
         x = x.reshape((x.shape[0], x.shape[1], -1))
 
@@ -290,13 +291,13 @@ class LSTMVAE(nn.Module):
 
         _, _, nfilt = enc_musig_x.shape
 
-        nfilt = int(nfilt/2)
+        nfilt = int(nfilt / 2)
 
-        c_mu = enc_musig_c[:,:nfilt]
-        c_sig = enc_musig_c[:,nfilt:]
-        
-        x_mu = enc_musig_x[:,:,:nfilt]
-        x_sig = enc_musig_x[:,:,nfilt:]
+        c_mu = enc_musig_c[:, :nfilt]
+        c_sig = enc_musig_c[:, nfilt:]
+
+        x_mu = enc_musig_x[:, :, :nfilt]
+        x_sig = enc_musig_x[:, :, nfilt:]
 
         enc_x = sample(x_mu, x_sig)
         enc_c = sample(c_mu, c_sig)
@@ -309,9 +310,9 @@ class LSTMVAE(nn.Module):
             this needs both the cell state and the
             bottlenecked feature
         '''
-        
-        x = self.bottleneck_dec_x(x).reshape((x.shape[0], x.shape[1], 
-                                                  self.unpacked_filter_dim, *self.bottleneck_size))
+
+        x = self.bottleneck_dec_x(x).reshape((x.shape[0], x.shape[1],
+                                              self.unpacked_filter_dim, *self.bottleneck_size))
         c = self.bottleneck_dec_c(c).reshape((x.shape[0], self.unpacked_filter_dim, *self.bottleneck_size))
 
         for i, layer in enumerate(self.decoder_layers):
@@ -320,9 +321,9 @@ class LSTMVAE(nn.Module):
 
         # smooth the final output mask to remove the gridding
         x = torch.swapaxes(
-                self.decoder_conv(
-                    torch.swapaxes(x, 1, 2)
-                ), 1, 2)
+            self.decoder_conv(
+                torch.swapaxes(x, 1, 2)
+            ), 1, 2)
 
         return x
 

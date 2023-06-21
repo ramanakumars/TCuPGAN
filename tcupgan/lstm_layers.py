@@ -213,7 +213,7 @@ class ConvTransposeLSTM(nn.Module):
                                      pool_size, stride=pool_size)
         bn2d = nn.InstanceNorm2d(self.hidden_dim)
         act2d = nn.LeakyReLU(0.2, True)
-        
+
         # upsampling the feature vector
         convt3d = nn.ConvTranspose3d(self.hidden_dim,
                                      self.hidden_dim,
