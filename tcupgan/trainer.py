@@ -348,9 +348,9 @@ def weights_init(net, init_type='normal', scaling=0.02):
 
 class TrainerUNet(Trainer):
 
-    tversky_alpha = 200
     tversky_beta = 0.7
     tversky_gamma = 0.5
+    seg_alpha = 200
     loss_type = 'tversky'
 
     def batch(self, x, y, train=False):
@@ -370,14 +370,13 @@ class TrainerUNet(Trainer):
         disc_fake = self.discriminator(disc_inp_fake)
         real_labels = torch.ones_like(disc_fake)
 
-        weight = 1 - torch.sum(target_tensor, axis=(0, 1, 3, 4)) / torch.sum(target_tensor)
-
         if self.loss_type == 'cross_entropy':
+            weight = 1 - torch.sum(target_tensor, axis=(0, 1, 3, 4)) / torch.sum(target_tensor)
             gen_loss_seg = cross_entropy(rearrange(gen_img, "b d c h w -> b c d h w"),
                                          rearrange(target_tensor, "b d c h w -> b c d h w"),
                                          weight=weight) * self.seg_alpha
         elif self.loss_type == 'tversky':
-            gen_loss_seg = fc_tversky(target_tensor, gen_img, beta=self.tversky_beta, gamma=self.tversky_gamma) * self.seg_alpha
+            gen_loss_seg = fc_tversky(target_tensor, torch.sigmoid(gen_img), beta=self.tversky_beta, gamma=self.tversky_gamma) * self.seg_alpha
         gen_loss_disc = adv_loss(disc_fake, real_labels)
         gen_loss = gen_loss_seg + gen_loss_disc
 

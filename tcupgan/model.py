@@ -65,15 +65,9 @@ class LSTMUNet(nn.Module):
             prev_encoder_filt = reverse_encoder_dims[i]
 
         final_conv = nn.Conv3d(prev_decoder_filt, output_channels, (1, 3, 3), padding=(0, 1, 1), stride=(1, 1, 1))
-        if output_channels > 1:
-            self.pred_final = nn.Sequential(Rearrange('b t c h w -> b c t h w'),
-                                            final_conv,
-                                            Rearrange('b c t h w -> b t c h w'))
-        else:
-            self.pred_final = nn.Sequential(Rearrange('b t c h w -> b c t h w'),
-                                            final_conv,
-                                            Rearrange('b c t h w -> b t c h w'),
-                                            nn.Sigmoid())
+        self.pred_final = nn.Sequential(Rearrange('b t c h w -> b c t h w'),
+                                        final_conv,
+                                        Rearrange('b c t h w -> b t c h w'))
 
         self.decoder_layers = nn.ModuleList(decoder_layers)
 
