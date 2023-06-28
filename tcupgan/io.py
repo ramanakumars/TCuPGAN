@@ -143,7 +143,7 @@ def create_generators(img_datafolder, batch_size, inchannels=3,
 class VideoDataGenerator(Dataset):
     size = 192
 
-    def __init__(self, root_folder, max_frames=10, in_channels=3, out_channels=126, verbose=False):
+    def __init__(self, root_folder, max_frames=10, in_channels=3, out_channels=126, verbose=False, mask_transform=None):
         self.root_folder = root_folder
         self.max_frames = max_frames
         self.in_channels = in_channels
@@ -175,6 +175,8 @@ class VideoDataGenerator(Dataset):
                 self.data.append([folder, min([i * max_frames, nframes - max_frames])])
 
         self.transform = transforms.Resize((self.size, self.size))
+        if mask_transform is not None:
+            self.mask_transform = mask_transform
 
     def __len__(self):
         return len(self.data)
@@ -185,27 +187,30 @@ class VideoDataGenerator(Dataset):
         img_fnames = sorted(glob.glob(os.path.join(self.root_folder, f"{folder}/origin/*.jpg")))[start:start + self.max_frames]
 
         imgs = torch.zeros((self.max_frames, self.in_channels, self.size, self.size))
-        masks = torch.zeros((self.max_frames, self.out_channels, self.size, self.size))
+        masks = torch.zeros((self.max_frames, self.size, self.size), dtype=torch.int64)
 
         for i, fname in enumerate(img_fnames):
             img, mask = self.get_image_mask_pair(fname)
             imgs[i, :] = self.transform(img)
             masks[i, :] = self.transform(mask)
 
+        if self.mask_transform is not None:
+            masks = self.mask_transform(masks)
+
+        if self.out_channels > 1:
+            masks = one_hot(
+                masks,
+                num_classes=self.out_channels
+            ).to(torch.float)
+            masks = rearrange(masks, "t h w c -> t c h w")
+
         return imgs, masks
 
     def get_image_mask_pair(self, fname):
         img = read_image(fname, ImageReadMode.RGB)
         mask = read_image(fname.replace("origin", "mask").replace('.jpg', '.png'), ImageReadMode.GRAY)[0, :]
-
         mask[mask > 124] = 0
-        mask = one_hot(
-            mask.to(torch.int64),
-            num_classes=self.out_channels
-        )
-        mask = rearrange(mask, "h w c -> c h w")
-
-        return img, mask
+        return img, torch.unsqueeze(mask, dim=0)
 
 
 class NpzDataSet(Dataset):

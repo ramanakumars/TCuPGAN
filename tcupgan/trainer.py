@@ -370,14 +370,87 @@ class TrainerUNet(Trainer):
         disc_fake = self.discriminator(disc_inp_fake)
         real_labels = torch.ones_like(disc_fake)
 
-        weight = 1 - torch.sum(target_tensor, axis=(0, 1, 3, 4)) / torch.sum(target_tensor)
-
         if self.loss_type == 'cross_entropy':
+            weight = 1 - torch.sum(target_tensor, axis=(0, 1, 3, 4)) / torch.sum(target_tensor)
             gen_loss_seg = cross_entropy(rearrange(gen_img, "b d c h w -> b c d h w"),
                                          rearrange(target_tensor, "b d c h w -> b c d h w"),
                                          weight=weight) * self.seg_alpha
         elif self.loss_type == 'tversky':
             gen_loss_seg = fc_tversky(target_tensor, gen_img, beta=self.tversky_beta, gamma=self.tversky_gamma) * self.seg_alpha
+        gen_loss_disc = adv_loss(disc_fake, real_labels)
+        gen_loss = gen_loss_seg + gen_loss_disc
+
+        # Train the generator
+        if train:
+            self.generator.zero_grad()
+            gen_loss.backward()
+            self.gen_optimizer.step()
+
+        # Train the discriminator
+        # On the real image
+        if train:
+            self.discriminator.zero_grad()
+
+        disc_inp_real = torch.cat((img_tensor, target_tensor), 2)
+        disc_real = self.discriminator(disc_inp_real)
+
+        disc_inp_fake = torch.cat((img_tensor, gen_img.detach()), 2)
+        disc_fake = self.discriminator(disc_inp_fake)
+
+        real_labels = torch.ones_like(disc_fake)
+        fake_labels = torch.zeros_like(disc_fake)
+        loss_real = adv_loss(disc_real, real_labels)
+        loss_fake = adv_loss(disc_fake, fake_labels)
+
+        disc_loss = (loss_fake + loss_real) / 2.
+
+        if train:
+            disc_loss.backward()
+            self.disc_optimizer.step()
+
+        keys = ['gen', self.loss_type, 'gdisc', 'discr', 'discf', 'disc']
+        mean_loss_i = [gen_loss.item(), gen_loss_seg.item(), gen_loss_disc.item(),
+                       loss_real.item(), loss_fake.item(), disc_loss.item()]
+
+        loss = {key: val for key, val in zip(keys, mean_loss_i)}
+
+        return loss
+
+
+class TrainerUNetOneShot(Trainer):
+
+    tversky_alpha = 200
+    tversky_beta = 0.3
+    tversky_gamma = 0.75
+    loss_type = 'tversky'
+
+    def batch(self, x, y, train=False):
+        '''
+            Train the generator and discriminator on a single batch
+        '''
+        # convert the input image and mask to tensors
+        if not isinstance(x, torch.Tensor):
+            img_tensor = torch.as_tensor(x, dtype=torch.float).to(self.device)
+            target_tensor = torch.as_tensor(y, dtype=torch.float).to(self.device)
+        else:
+            img_tensor, target_tensor = x.to(self.device, non_blocking=True), y.to(self.device, non_blocking=True)
+
+        gen_img = self.generator(img_tensor, target_tensor[:, 0, :])
+
+        disc_inp_fake = torch.cat((img_tensor, gen_img), 2)
+        disc_fake = self.discriminator(disc_inp_fake)
+        real_labels = torch.ones_like(disc_fake)
+
+        if self.loss_type == 'w_cross_entropy':
+            weight = 1 - torch.sum(target_tensor, axis=(0, 1, 3, 4)) / torch.sum(target_tensor)
+            gen_loss_seg = cross_entropy(rearrange(gen_img, "b d c h w -> b c d h w"),
+                                         rearrange(target_tensor, "b d c h w -> b c d h w"),
+                                         weight=weight) * self.seg_alpha
+        elif self.loss_type == 'cross_entropy':
+            gen_loss_seg = cross_entropy(rearrange(gen_img, "b d c h w -> b c d h w"),
+                                         rearrange(target_tensor, "b d c h w -> b c d h w")) * self.seg_alpha
+        elif self.loss_type == 'tversky':
+            gen_loss_seg = fc_tversky(target_tensor, torch.sigmoid(gen_img), beta=self.tversky_beta, gamma=self.tversky_gamma) * self.seg_alpha
         gen_loss_disc = adv_loss(disc_fake, real_labels)
         gen_loss = gen_loss_seg + gen_loss_disc
 

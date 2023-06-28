@@ -72,8 +72,7 @@ class LSTMUNet(nn.Module):
         else:
             self.pred_final = nn.Sequential(Rearrange('b t c h w -> b c t h w'),
                                             final_conv,
-                                            Rearrange('b c t h w -> b t c h w'),
-                                            nn.Sigmoid())
+                                            Rearrange('b c t h w -> b t c h w'))
 
         self.decoder_layers = nn.ModuleList(decoder_layers)
 
