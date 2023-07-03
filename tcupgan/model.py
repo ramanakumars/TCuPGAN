@@ -1,10 +1,11 @@
 import torch.nn as nn
 import torch
 from .lstm_layers import (ConvLSTM, ConvTransposeLSTM)
+from .transfer import Transferable
 from einops.layers.torch import Rearrange
 
 
-class LSTMUNet(nn.Module):
+class LSTMUNet(nn.Module, Transferable):
     gen_type = 'UNet'
 
     def __init__(self, hidden_dims=[8, 16, 32], decoder_hidden_dims=None, input_channels=1, output_channels=4):
