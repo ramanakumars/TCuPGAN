@@ -16,7 +16,7 @@ class BraTSDataGenerator(Dataset):
     def __init__(self, root_folder, num_classes=4, size=256):
         self.root_folder = root_folder
         self.sub_folders = [x for x in sorted(glob.glob(self.root_folder + "/*"))]
-        self.case_ID = [int(os.path.basename(folder).split('-')[2]) for folder in self.sub_folders]
+        self.IDs = ['-'.join(os.path.basename(folder).split('-')[2:4]) for folder in self.sub_folders]
         self.num_classes = num_classes
         self.resize = transforms.Resize((size, size), antialias=True)
 
@@ -49,8 +49,8 @@ class BraTSDataGenerator(Dataset):
 
         return img, mask
 
-    def get_from_ID(self, ID):
-        index = self.case_ID.index(ID)
+    def get_from_ID(self, ID, timepoint):
+        index = self.IDs.index(f'{ID:05d}-{timepoint:03d}')
         return self[index]
 
 
