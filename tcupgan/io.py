@@ -8,136 +8,50 @@ from torchvision import transforms
 from einops import rearrange
 import os
 import tqdm
-import signal
+import nibabel as nib
 
 
-def initializer():
-    """Ignore CTRL+C in the worker process."""
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
+class BraTSDataGenerator(Dataset):
 
+    def __init__(self, root_folder, num_classes=4, size=256):
+        self.root_folder = root_folder
+        self.sub_folders = [x for x in sorted(glob.glob(self.root_folder + "/*"))]
+        self.case_ID = [int(os.path.basename(folder).split('-')[2]) for folder in self.sub_folders]
+        self.num_classes = num_classes
+        self.resize = transforms.Resize((size, size), antialias=True)
 
-class DataGenerator:
-    file_type = 'npz'
-
-    def __init__(self, datafolder,
-                 batch_size, inchannels=3, outchannels=3,
-                 indices=None, norm=1.):
-        self.img_datafolder = datafolder
-        self.batch_size = batch_size
-
-        self.imgfiles = np.asarray(
-            sorted(glob.glob(datafolder + f"*.{self.file_type}")))
-
-        if indices is None:
-            self.indices = np.arange(len(self.imgfiles))
-        else:
-            self.indices = indices
-
-        self.ndata = len(self.indices)
-
-        self.inchannels = inchannels
-        self.outchannels = outchannels
-
-        self.norm = norm
-        self.perc_normalize = False
-
-        # get info about the data
-
-        if self.file_type == 'npz':
-            img0 = np.load(self.imgfiles[0])['img']
-        else:
-            img0 = np.load(self.imgfiles[0])
-
-        if len(img0.shape) == 3:
-            self.d, self.h, self.w = img0.shape
-        else:
-            self.d, self.nch, self.h, self.w = img0.shape
-
-        print(f"Found {self.ndata} images of shape {self.w}x{self.h}x{self.d} with {self.nch} channels")
+        print(f"Found {len(self)} images")
 
     def __len__(self):
-        return self.ndata // self.batch_size
-
-    def shuffle(self):
-        np.random.shuffle(self.indices)
+        return len(self.sub_folders)
 
     def __getitem__(self, index):
-        if index > len(self):
-            raise StopIteration
+        folder = self.sub_folders[index]
 
-        batch_indices = self.indices[index * self.batch_size:
-                                     (index + 1) * self.batch_size]
-        data = self.get_from_indices(batch_indices)
-        return data
+        t1 = nib.load(glob.glob(folder + "/*-t1n.nii.gz")[0]).get_fdata()
+        t1ce = nib.load(glob.glob(folder + "/*-t1c.nii.gz")[0]).get_fdata()
+        t2 = nib.load(glob.glob(folder + "/*-t2w.nii.gz")[0]).get_fdata()
+        flair = nib.load(glob.glob(folder + "/*-t2f.nii.gz")[0]).get_fdata()
 
-    def get_from_indices(self, batch_indices):
-        imgfiles = self.imgfiles[batch_indices]
+        img = torch.zeros((4, 240, 240, 155), dtype=torch.float)
+        img[0, :, :] = torch.as_tensor(t1 / np.percentile(t1.flatten(), 99))
+        img[1, :, :] = torch.as_tensor(t1ce / np.percentile(t1ce.flatten(), 99))
+        img[2, :, :] = torch.as_tensor(t2 / np.percentile(t2.flatten(), 99))
+        img[3, :, :] = torch.as_tensor(flair / np.percentile(flair.flatten(), 99))
+        img = self.resize(rearrange(img, "c h w z -> z c h w"))
 
-        imgs = np.zeros((len(imgfiles), self.d, self.inchannels, self.h, self.w))
-        segs = np.zeros((len(imgfiles), self.d, self.outchannels, self.h, self.w))
+        try:
+            seg = np.asarray(nib.load(glob.glob(folder + "/*-seg.nii.gz")[0]).get_fdata(), dtype=int)
+            seg_t = torch.LongTensor(seg)
+            mask = self.resize(rearrange(one_hot(seg_t, num_classes=self.num_classes).to(torch.float), 'h w t c -> t c h w'))
+        except IndexError:
+            mask = None
 
-        for i in range(len(imgfiles)):
-            data = np.load(imgfiles[i])
+        return img, mask
 
-            imgs[i, :] = data['img'] / self.norm
-            segs[i, :] = data['mask']
-
-        return imgs, segs
-
-
-class NpyDataGenerator(DataGenerator):
-    file_type = 'npy'
-
-    def get_from_indices(self, batch_indices):
-        imgfiles = self.imgfiles[batch_indices]
-
-        imgs = np.zeros((len(imgfiles), self.d, self.nch, self.h, self.w))
-
-        for i, imgi in enumerate(imgfiles):
-            imgi = np.load(imgi)
-            if self.perc_normalize:
-                imgi = imgi / np.percentile(imgi.flatten(), 98)
-
-            imgs[i, :] = np.transpose(imgi, (1, 0, 2, 3))
-
-        return imgs, None
-
-
-def create_generators(img_datafolder, batch_size, inchannels=3,
-                      outchannels=3, val_split=0.1, datatype='npz',
-                      norm=1.):
-    if datatype == 'npz':
-        imgfiles = np.asarray(sorted(glob.glob(img_datafolder + "*.npz")))
-    elif datatype == 'npy':
-        imgfiles = np.asarray(sorted(glob.glob(img_datafolder + "*.npy")))
-
-    ndata = len(imgfiles)
-
-    print(f"Loading data with {ndata} images")
-
-    inds = np.arange(ndata)
-    np.random.shuffle(inds)
-
-    val_split_ind = int(ndata * val_split)
-    val_ind = inds[:val_split_ind]
-    training_ind = inds[val_split_ind:]
-
-    if datatype == 'npz':
-        train_data = DataGenerator(img_datafolder, batch_size,
-                                   indices=training_ind, inchannels=inchannels,
-                                   outchannels=outchannels, norm=norm)
-        val_data = DataGenerator(img_datafolder, batch_size,
-                                 indices=val_ind, inchannels=inchannels,
-                                 outchannels=outchannels, norm=norm)
-    elif datatype == 'npy':
-        train_data = NpyDataGenerator(img_datafolder, batch_size,
-                                      indices=training_ind, inchannels=inchannels,
-                                      outchannels=outchannels, norm=norm)
-        val_data = NpyDataGenerator(img_datafolder, batch_size,
-                                    indices=val_ind, inchannels=inchannels,
-                                    outchannels=outchannels, norm=norm)
-
-    return train_data, val_data
+    def get_from_ID(self, ID):
+        index = self.case_ID.index(ID)
+        return self[index]
 
 
 class VideoDataGenerator(Dataset):
