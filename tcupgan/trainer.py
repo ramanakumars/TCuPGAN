@@ -376,7 +376,13 @@ class TrainerUNet(Trainer):
                                          rearrange(target_tensor, "b d c h w -> b c d h w"),
                                          weight=weight) * self.seg_alpha
         elif self.loss_type == 'tversky':
-            gen_loss_seg = fc_tversky(target_tensor, torch.sigmoid(gen_img), beta=self.tversky_beta, gamma=self.tversky_gamma) * self.seg_alpha
+            if gen_img.shape[2] > 1:
+                activation = torch.nn.Softmax(dim=2)
+            else:
+                activation = torch.nn.Sigmoid()
+            gen_loss_seg = fc_tversky(target_tensor, activation(gen_img),
+                                      beta=self.tversky_beta,
+                                      gamma=self.tversky_gamma) * self.seg_alpha
         gen_loss_disc = adv_loss(disc_fake, real_labels)
         gen_loss = gen_loss_seg + gen_loss_disc
 
