@@ -349,7 +349,7 @@ def weights_init(net, init_type='normal', scaling=0.02):
 class TrainerUNet(Trainer):
 
     tversky_beta = 0.7
-    tversky_gamma = 0.5
+    tversky_gamma = 0.75
     seg_alpha = 200
     loss_type = 'tversky'
 
