@@ -1,9 +1,10 @@
 import torch
 from torch import nn
 from .lstm_layers import ConvLSTM
+from .transfer import Transferable
 
 
-class PatchDiscriminator(nn.Module):
+class PatchDiscriminator(nn.Module, Transferable):
     '''
         Patch based discriminator which predicts
         the probability whether a subset cube of the image
