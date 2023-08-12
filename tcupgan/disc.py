@@ -11,7 +11,7 @@ class PatchDiscriminator(nn.Module, Transferable):
         is real or fake.
     '''
 
-    def __init__(self, input_channels, nlayers=3, nfilt=16, dropout=0.25, activation='leakyrelu'):
+    def __init__(self, input_channels, nlayers=3, nfilt=16, dropout=0.25, activation='leakyrelu', kernel_size=3):
         super(PatchDiscriminator, self).__init__()
 
         # the first convolution goes from the input channels
@@ -19,7 +19,7 @@ class PatchDiscriminator(nn.Module, Transferable):
         prev_filt = input_channels
         next_filt = nfilt
 
-        kernel_size = 3
+        kernel_size = kernel_size
 
         if activation == 'leakyrelu':
             activation = nn.LeakyReLU(0.2, True)

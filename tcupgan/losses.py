@@ -6,9 +6,6 @@ def tversky(y_true, y_pred, beta, batch_mean=True):
     tp = torch.sum(y_true * y_pred, axis=(1, 2, 3, 4))
     fn = torch.sum((1. - y_pred) * y_true, axis=(1, 2, 3, 4))
     fp = torch.sum(y_pred * (1. - y_true), axis=(1, 2, 3, 4))
-    # tversky = reduce_mean(tp)/(reduce_mean(tp) +
-    #                           beta*reduce_mean(fn) +
-    #                           (1. - beta)*reduce_mean(fp))
     tversky = tp /\
         (tp + beta * fn + (1. - beta) * fp)
 
@@ -59,7 +56,8 @@ mink_power = 1
 
 
 def mink(y_pred, y_true):
-    return torch.mean(torch.sum(torch.abs(y_pred - y_true)**mink_power, axis=(1, 2, 3, 4)))  # **(1./mink_power))
+    # **(1./mink_power))
+    return torch.mean(torch.sum(torch.abs(y_pred - y_true)**mink_power, axis=(1, 2, 3, 4)))
 
 
 # alias

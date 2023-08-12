@@ -17,8 +17,9 @@ class Transferable():
                 param = param.data
 
             # find the weight with the closest name to this
-            sub_name = '.'.join(name.split('.')[-2:])
-            own_state_name = [n for n in state_names if sub_name in n]
+            sub_name = '.'.join(name.split('.')[2:])
+            own_state_name = [n for n in state_names if (sub_name in n) and (param.shape == own_state[n].data.shape)]
+            print(sub_name, name, own_state_name)
             if len(own_state_name) == 1:
                 own_state_name = own_state_name[0]
             else:
