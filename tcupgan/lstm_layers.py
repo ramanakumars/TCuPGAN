@@ -281,6 +281,7 @@ class UpSampleLSTM(nn.Module):
 
         # apply max pooling on the LSTM result
         c = self.upsample2d(c)  # , self.upsample2d)
-        output_feature = torch.swapaxes(self.upsample3d(torch.swapaxes(output_feature, 1, 2)), 1, 2)
+        output_feature = torch.swapaxes(self.upsample3d(
+            torch.swapaxes(output_feature, 1, 2)), 1, 2)
 
         return output_feature, c

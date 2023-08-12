@@ -7,7 +7,7 @@ from collections import defaultdict
 from torch import optim
 from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau
 from .losses import mink, kl_loss, adv_loss, fc_tversky
-from torch.nn.functional import cross_entropy
+from torch.nn.functional import cross_entropy, binary_cross_entropy
 from einops import rearrange
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -60,7 +60,8 @@ class Trainer:
 
         gen_img = self.generator.decode(x, c)
 
-        labels = torch.full((img_tensor.shape[0], img_tensor.shape[1], 1), 1, dtype=torch.float, device=device)
+        labels = torch.full(
+            (img_tensor.shape[0], img_tensor.shape[1], 1), 1, dtype=torch.float, device=device)
 
         torch.autograd.set_detect_anomaly(True)
 
@@ -155,8 +156,10 @@ class Trainer:
         '''
 
         if (lr_decay is not None) and not reduce_on_plateau:
-            gen_lr = gen_learning_rate * (lr_decay)**((self.start - 1) / (decay_freq))
-            dsc_lr = dsc_learning_rate * (lr_decay)**((self.start - 1) / (decay_freq))
+            gen_lr = gen_learning_rate * \
+                (lr_decay)**((self.start - 1) / (decay_freq))
+            dsc_lr = dsc_learning_rate * \
+                (lr_decay)**((self.start - 1) / (decay_freq))
         else:
             gen_lr = gen_learning_rate
             dsc_lr = dsc_learning_rate
@@ -176,7 +179,8 @@ class Trainer:
         # set up the learning rate scheduler with exponential lr decay
         if reduce_on_plateau:
             gen_scheduler = ReduceLROnPlateau(self.gen_optimizer, verbose=True)
-            dsc_scheduler = ReduceLROnPlateau(self.disc_optimizer, verbose=True)
+            dsc_scheduler = ReduceLROnPlateau(
+                self.disc_optimizer, verbose=True)
             self.neptune_config['model/parameters/scheduler'] = 'ReduceLROnPlateau'
         elif lr_decay is not None:
             gen_scheduler = ExponentialLR(self.gen_optimizer, gamma=lr_decay)
@@ -225,7 +229,8 @@ class Trainer:
                     losses[key].append(value)
                     loss_mean[key] = np.mean(losses[key], axis=0)
 
-                loss_str = " ".join([f"{key}: {value:.2e}" for key, value in loss_mean.items()])
+                loss_str = " ".join(
+                    [f"{key}: {value:.2e}" for key, value in loss_mean.items()])
 
                 pbar.set_postfix_str(loss_str)
 
@@ -235,7 +240,8 @@ class Trainer:
 
             if self.neptune_config is not None:
                 self.neptune_config['train/gen_loss'].append(loss_mean['gen'])
-                self.neptune_config['train/disc_loss'].append(loss_mean['disc'])
+                self.neptune_config['train/disc_loss'].append(
+                    loss_mean['disc'])
 
             # validate every `validation_freq` epochs
             self.discriminator.eval()
@@ -257,7 +263,8 @@ class Trainer:
                     losses[key].append(value)
                     loss_mean[key] = np.mean(losses[key], axis=0)
 
-                loss_str = " ".join([f"{key}: {value:.2e}" for key, value in loss_mean.items()])
+                loss_str = " ".join(
+                    [f"{key}: {value:.2e}" for key, value in loss_mean.items()])
 
                 pbar.set_postfix_str(loss_str)
 
@@ -360,9 +367,11 @@ class TrainerUNet(Trainer):
         # convert the input image and mask to tensors
         if not isinstance(x, torch.Tensor):
             img_tensor = torch.as_tensor(x, dtype=torch.float).to(self.device)
-            target_tensor = torch.as_tensor(y, dtype=torch.float).to(self.device)
+            target_tensor = torch.as_tensor(
+                y, dtype=torch.float).to(self.device)
         else:
-            img_tensor, target_tensor = x.to(self.device, non_blocking=True), y.to(self.device, non_blocking=True)
+            img_tensor, target_tensor = x.to(self.device, non_blocking=True), y.to(
+                self.device, non_blocking=True)
 
         gen_img = self.generator(img_tensor)
 
@@ -371,20 +380,27 @@ class TrainerUNet(Trainer):
         real_labels = torch.ones_like(disc_fake)
 
         if self.loss_type == 'cross_entropy':
-            weight = 1 - torch.sum(target_tensor, axis=(0, 1, 3, 4)) / torch.sum(target_tensor)
+            weight = 1 - torch.sum(target_tensor,
+                                   axis=(0, 1, 3, 4)) / torch.sum(target_tensor)
             gen_loss_seg = cross_entropy(rearrange(gen_img, "b d c h w -> b c d h w"),
-                                         rearrange(target_tensor, "b d c h w -> b c d h w"),
+                                         rearrange(target_tensor,
+                                                   "b d c h w -> b c d h w"),
                                          weight=weight) * self.seg_alpha
+        elif self.loss_type == 'weigthed_bce':
+            weight = 1 - torch.sum(target_tensor, dim=(0, 1, 3, 4),
+                                   keepdim=True) / torch.sum(target_tensor)
+            gen_loss_seg = binary_cross_entropy(gen_img,
+                                                target_tensor,
+                                                weight=weight) * self.seg_alpha
         elif self.loss_type == 'tversky':
-            if gen_img.shape[2] > 1:
-                activation = torch.nn.Softmax(dim=2)
-            else:
-                activation = torch.nn.Sigmoid()
-            gen_loss_seg = fc_tversky(target_tensor, activation(gen_img),
+            weights = 1 - torch.sum(target_tensor,
+                                    dim=(0, 1, 3, 4)) / torch.sum(target_tensor)
+            gen_loss_seg = fc_tversky(target_tensor, gen_img, weights,
                                       beta=self.tversky_beta,
                                       gamma=self.tversky_gamma) * self.seg_alpha
+
         gen_loss_disc = adv_loss(disc_fake, real_labels)
-        gen_loss = gen_loss_seg + gen_loss_disc
+        gen_loss = gen_loss_seg + gen_loss_disc  # + gen_loss_bce
 
         # Train the generator
         if train:
